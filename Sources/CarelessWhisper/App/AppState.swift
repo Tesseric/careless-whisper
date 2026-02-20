@@ -23,6 +23,7 @@ final class AppState: ObservableObject {
     @Published var hasCompletedOnboarding = false
     @Published var hotkeyDescription: String = ""
     @Published var liveTranscription: String = ""
+    @Published var gitContext: GitContext?
 
     let audioCaptureService = AudioCaptureService()
     let whisperService = WhisperService()
@@ -174,6 +175,18 @@ final class AppState: ObservableObject {
 
         logger.info("Starting recording")
         targetBundleID = textInjector.captureFrontmostApp()
+
+        // Detect git context asynchronously if the frontmost app is a terminal
+        gitContext = nil
+        if GitContextService.isTerminal(bundleID: targetBundleID),
+           let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier {
+            Task {
+                let context = await GitContextService.detect(terminalPID: pid)
+                if self.recordingState != .idle {
+                    self.gitContext = context
+                }
+            }
+        }
 
         do {
             audioCaptureService.onSpeechChunkReady = { [weak self] chunk in

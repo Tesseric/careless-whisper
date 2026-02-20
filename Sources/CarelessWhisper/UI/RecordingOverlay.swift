@@ -77,6 +77,26 @@ struct RecordingOverlayView: View {
                 }
             }
 
+            if let context = appState.gitContext {
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.triangle.branch")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.white.opacity(0.6))
+
+                    Text(context.repoName)
+                        .font(.system(.caption, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.8))
+
+                    Text("/")
+                        .foregroundStyle(.white.opacity(0.4))
+
+                    Text(context.branch)
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.7))
+                        .lineLimit(1)
+                }
+            }
+
             if appState.recordingState == .recording, !appState.liveTranscription.isEmpty {
                 Text(appState.liveTranscription)
                     .font(.system(.caption))
