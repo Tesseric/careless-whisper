@@ -96,8 +96,8 @@ struct RecordingOverlayView: View {
                         .lineLimit(1)
                 }
 
-                if !context.stagedFiles.isEmpty || !context.unstagedFiles.isEmpty {
-                    GitStatusView(staged: context.stagedFiles, unstaged: context.unstagedFiles)
+                if !context.stagedFiles.isEmpty || !context.unstagedFiles.isEmpty || !context.branchFiles.isEmpty {
+                    GitStatusView(staged: context.stagedFiles, unstaged: context.unstagedFiles, branch: context.branchFiles)
                 }
             }
 
@@ -124,11 +124,15 @@ struct RecordingOverlayView: View {
 private struct GitStatusView: View {
     let staged: [GitFileChange]
     let unstaged: [GitFileChange]
+    let branch: [GitFileChange]
 
     private let maxFiles = 3
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
+            if !branch.isEmpty {
+                fileSection("Branch", files: branch, dotColor: .blue)
+            }
             if !staged.isEmpty {
                 fileSection("Staged", files: staged, dotColor: .green)
             }

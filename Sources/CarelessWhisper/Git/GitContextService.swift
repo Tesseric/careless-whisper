@@ -35,6 +35,7 @@ struct GitContext {
     let gitHubURL: String?
     let stagedFiles: [GitFileChange]
     let unstagedFiles: [GitFileChange]
+    let branchFiles: [GitFileChange]
 }
 
 /// Detects Git repository context from the active terminal's shell processes.
@@ -87,9 +88,10 @@ final class GitContextService {
             }
 
             let (staged, unstaged) = parseGitStatus(cwd: repoRoot)
+            let branchFiles = parseBranchDiff(branch: branch, cwd: repoRoot)
 
-            logger.info("Detected git context: \(repoName) @ \(branch) — \(staged.count) staged, \(unstaged.count) unstaged")
-            return GitContext(repoName: repoName, branch: branch, ownerAndRepo: ownerAndRepo, gitHubURL: gitHubURL, stagedFiles: staged, unstagedFiles: unstaged)
+            logger.info("Detected git context: \(repoName) @ \(branch) — \(staged.count) staged, \(unstaged.count) unstaged, \(branchFiles.count) branch")
+            return GitContext(repoName: repoName, branch: branch, ownerAndRepo: ownerAndRepo, gitHubURL: gitHubURL, stagedFiles: staged, unstagedFiles: unstaged, branchFiles: branchFiles)
         }
 
         return nil
@@ -197,6 +199,29 @@ final class GitContextService {
         case "?": return .untracked
         default:  return .modified
         }
+    }
+
+    /// Files changed on this branch compared to the default branch (main/master).
+    private static func parseBranchDiff(branch: String, cwd: String) -> [GitFileChange] {
+        // Don't diff if already on the default branch
+        let defaultBranches = ["main", "master"]
+        guard !defaultBranches.contains(branch) else { return [] }
+
+        // Find the merge base with the default branch
+        let base = defaultBranches.lazy.compactMap { git(["merge-base", $0, "HEAD"], cwd: cwd) }.first
+        guard let base else { return [] }
+
+        guard let output = git(["diff", "--name-status", base], cwd: cwd) else { return [] }
+
+        var files: [GitFileChange] = []
+        for line in output.split(separator: "\n") {
+            let parts = line.split(separator: "\t", maxSplits: 1)
+            guard parts.count >= 2 else { continue }
+            let statusChar = parts[0].first ?? "M"
+            let path = parts.count > 2 ? String(parts[2]) : String(parts[1]) // renames: status\told\tnew
+            files.append(GitFileChange(path: path, type: charToChangeType(statusChar)))
+        }
+        return files
     }
 
     private static func git(_ args: [String], cwd: String) -> String? {
