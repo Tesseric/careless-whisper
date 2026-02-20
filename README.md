@@ -1,5 +1,11 @@
 # Careless Whisper
 
+## Install
+
+```bash
+brew install --cask tesseric/careless-whisper/careless-whisper
+```
+
 A macOS menu bar app for **push-to-talk voice-to-text** built for developers who live in the terminal. Speak naturally to type into your editor, terminal, or SWE agent — transcribed locally via Whisper with zero cloud dependencies.
 
 When you're pair-programming with an AI agent and your hands are on the keyboard, Careless Whisper gives you a voice channel to your tools. Hold a hotkey, speak, release — your words appear exactly where your cursor is.
