@@ -18,6 +18,11 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --version)
+            if [[ $# -lt 2 || -z "${2:-}" ]]; then
+                echo "Error: --version requires a non-empty value." >&2
+                echo "Usage: ./scripts/bundle.sh [--release] [--version <version>]" >&2
+                exit 1
+            fi
             VERSION="$2"
             shift 2
             ;;

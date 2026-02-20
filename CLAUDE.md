@@ -10,8 +10,9 @@ swift build -c release         # release build
 swift test                     # run all tests
 swift test --filter CarelessWhisperTests.AudioBufferTests/testAppendAndFlush  # single test
 
-./scripts/bundle.sh            # bundle as macOS .app (debug) → ./build/Careless Whisper.app
-./scripts/bundle.sh --release  # bundle as macOS .app (release)
+./scripts/bundle.sh                        # bundle as macOS .app (debug) → ./build/Careless Whisper.app
+./scripts/bundle.sh --release              # bundle as macOS .app (release)
+./scripts/bundle.sh --release --version 1.0.0  # bundle release with explicit app version
 ```
 
 ## Project Overview
