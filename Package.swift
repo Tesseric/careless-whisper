@@ -19,7 +19,7 @@ let package = Package(
                 "HotKey",
             ],
             path: "Sources/CarelessWhisper",
-            exclude: ["Info.plist"],
+            exclude: ["Info.plist", "CarelessWhisper.entitlements"],
             linkerSettings: [
                 .linkedFramework("AVFoundation"),
                 .linkedFramework("CoreAudio"),

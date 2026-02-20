@@ -2,17 +2,36 @@
 set -euo pipefail
 
 # Build and bundle Careless Whisper as a macOS .app
-# Usage: ./scripts/bundle.sh [--release]
+# Usage: ./scripts/bundle.sh [--release] [--version <version>]
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 APP_NAME="Careless Whisper"
 BUNDLE_ID="com.carelesswhisper.app"
 BUILD_CONFIG="debug"
+VERSION="0.0.0-dev"
 
-if [[ "${1:-}" == "--release" ]]; then
-    BUILD_CONFIG="release"
-fi
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --release)
+            BUILD_CONFIG="release"
+            shift
+            ;;
+        --version)
+            if [[ $# -lt 2 || -z "${2:-}" ]]; then
+                echo "Error: --version requires a non-empty value." >&2
+                echo "Usage: ./scripts/bundle.sh [--release] [--version <version>]" >&2
+                exit 1
+            fi
+            VERSION="$2"
+            shift 2
+            ;;
+        *)
+            echo "Unknown option: $1"
+            exit 1
+            ;;
+    esac
+done
 
 echo "Building ($BUILD_CONFIG)..."
 cd "$PROJECT_DIR"
@@ -38,7 +57,7 @@ mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 cp "$BINARY_PATH" "$MACOS_DIR/CarelessWhisper"
 
 # Create Info.plist
-cat > "$CONTENTS_DIR/Info.plist" << 'PLIST'
+cat > "$CONTENTS_DIR/Info.plist" << PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -50,9 +69,9 @@ cat > "$CONTENTS_DIR/Info.plist" << 'PLIST'
     <key>CFBundleIdentifier</key>
     <string>com.carelesswhisper.app</string>
     <key>CFBundleVersion</key>
-    <string>1.0.0</string>
+    <string>${VERSION}</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0.0</string>
+    <string>${VERSION}</string>
     <key>CFBundleExecutable</key>
     <string>CarelessWhisper</string>
     <key>CFBundlePackageType</key>
