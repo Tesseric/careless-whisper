@@ -36,6 +36,48 @@ struct GitContext {
     let stagedFiles: [GitFileChange]
     let unstagedFiles: [GitFileChange]
     let branchFiles: [GitFileChange]
+    let aheadBehind: AheadBehind?
+    let lastCommit: LastCommit?
+    let stashCount: Int
+    let diffPreview: DiffPreview?
+    let ciStatus: CIStatus?
+    let prInfo: PRInfo?
+}
+
+struct AheadBehind {
+    let ahead: Int
+    let behind: Int
+}
+
+struct LastCommit {
+    let message: String
+    let relativeTime: String
+}
+
+enum CIState {
+    case success, failure, pending, cancelled, unknown
+}
+
+struct CIStatus {
+    let state: CIState
+    let name: String
+}
+
+struct PRInfo {
+    let number: Int
+    let title: String
+    let reviewDecision: String?
+}
+
+struct DiffLine {
+    enum Kind { case added, removed }
+    let kind: Kind
+    let text: String
+}
+
+struct DiffPreview {
+    let fileName: String
+    let lines: [DiffLine]
 }
 
 /// Detects Git repository context from the active terminal's shell processes.
@@ -89,9 +131,21 @@ final class GitContextService {
 
             let (staged, unstaged) = parseGitStatus(cwd: repoRoot)
             let branchFiles = parseBranchDiff(branch: branch, cwd: repoRoot)
+            let aheadBehind = parseAheadBehind(branch: branch, cwd: repoRoot)
+            let lastCommit = parseLastCommit(cwd: repoRoot)
+            let stashCount = countStashes(cwd: repoRoot)
+            let diffPreview = parseDiffPreview(unstagedFiles: unstaged, cwd: repoRoot)
+            let ciStatus = queryCIStatus(branch: branch, cwd: repoRoot)
+            let prInfo = queryPRInfo(branch: branch, cwd: repoRoot)
 
             logger.info("Detected git context: \(repoName) @ \(branch) — \(staged.count) staged, \(unstaged.count) unstaged, \(branchFiles.count) branch")
-            return GitContext(repoName: repoName, branch: branch, ownerAndRepo: ownerAndRepo, gitHubURL: gitHubURL, stagedFiles: staged, unstagedFiles: unstaged, branchFiles: branchFiles)
+            return GitContext(
+                repoName: repoName, branch: branch,
+                ownerAndRepo: ownerAndRepo, gitHubURL: gitHubURL,
+                stagedFiles: staged, unstagedFiles: unstaged, branchFiles: branchFiles,
+                aheadBehind: aheadBehind, lastCommit: lastCommit, stashCount: stashCount,
+                diffPreview: diffPreview, ciStatus: ciStatus, prInfo: prInfo
+            )
         }
 
         return nil
@@ -203,11 +257,9 @@ final class GitContextService {
 
     /// Files changed on this branch compared to the default branch (main/master).
     private static func parseBranchDiff(branch: String, cwd: String) -> [GitFileChange] {
-        // Don't diff if already on the default branch
         let defaultBranches = ["main", "master"]
         guard !defaultBranches.contains(branch) else { return [] }
 
-        // Find the merge base with the default branch
         let base = defaultBranches.lazy.compactMap { git(["merge-base", $0, "HEAD"], cwd: cwd) }.first
         guard let base else { return [] }
 
@@ -218,17 +270,110 @@ final class GitContextService {
             let parts = line.split(separator: "\t", maxSplits: 1)
             guard parts.count >= 2 else { continue }
             let statusChar = parts[0].first ?? "M"
-            let path = parts.count > 2 ? String(parts[2]) : String(parts[1]) // renames: status\told\tnew
+            let path = parts.count > 2 ? String(parts[2]) : String(parts[1])
             files.append(GitFileChange(path: path, type: charToChangeType(statusChar)))
         }
         return files
+    }
+
+    private static func parseAheadBehind(branch: String, cwd: String) -> AheadBehind? {
+        guard let output = git(["rev-list", "--left-right", "--count", "origin/\(branch)...HEAD"], cwd: cwd) else { return nil }
+        let parts = output.split(whereSeparator: \.isWhitespace)
+        guard parts.count == 2, let behind = Int(parts[0]), let ahead = Int(parts[1]) else { return nil }
+        return AheadBehind(ahead: ahead, behind: behind)
+    }
+
+    private static func parseLastCommit(cwd: String) -> LastCommit? {
+        guard let message = git(["log", "-1", "--format=%s"], cwd: cwd),
+              let relTime = git(["log", "-1", "--format=%ar"], cwd: cwd) else { return nil }
+        let short = relTime
+            .replacingOccurrences(of: " seconds? ago", with: "s ago", options: .regularExpression)
+            .replacingOccurrences(of: " minutes? ago", with: "m ago", options: .regularExpression)
+            .replacingOccurrences(of: " hours? ago", with: "h ago", options: .regularExpression)
+            .replacingOccurrences(of: " days? ago", with: "d ago", options: .regularExpression)
+            .replacingOccurrences(of: " weeks? ago", with: "w ago", options: .regularExpression)
+            .replacingOccurrences(of: " months? ago", with: "mo ago", options: .regularExpression)
+            .replacingOccurrences(of: " years? ago", with: "y ago", options: .regularExpression)
+        return LastCommit(message: message, relativeTime: short)
+    }
+
+    private static func countStashes(cwd: String) -> Int {
+        guard let output = git(["stash", "list"], cwd: cwd) else { return 0 }
+        return output.split(separator: "\n").count
+    }
+
+    private static func parseDiffPreview(unstagedFiles: [GitFileChange], cwd: String) -> DiffPreview? {
+        guard let file = unstagedFiles.first(where: { $0.type == .modified }) else { return nil }
+        guard let output = git(["diff", "-U0", "--no-color", "--", file.path], cwd: cwd) else { return nil }
+
+        var lines: [DiffLine] = []
+        for line in output.split(separator: "\n", omittingEmptySubsequences: false) {
+            if line.hasPrefix("+") && !line.hasPrefix("+++") {
+                lines.append(DiffLine(kind: .added, text: String(line.dropFirst())))
+            } else if line.hasPrefix("-") && !line.hasPrefix("---") {
+                lines.append(DiffLine(kind: .removed, text: String(line.dropFirst())))
+            }
+            if lines.count >= 4 { break }
+        }
+        return lines.isEmpty ? nil : DiffPreview(fileName: file.displayName, lines: lines)
+    }
+
+    // MARK: - GitHub CLI
+
+    private static func findGH() -> String? {
+        ["/opt/homebrew/bin/gh", "/usr/local/bin/gh", "/usr/bin/gh"]
+            .first { FileManager.default.isExecutableFile(atPath: $0) }
+    }
+
+    private static func queryCIStatus(branch: String, cwd: String) -> CIStatus? {
+        guard let gh = findGH(),
+              let output = run(gh, args: ["run", "list", "--branch", branch, "--limit", "1",
+                                          "--json", "status,conclusion,name"], cwd: cwd, timeout: 5) else { return nil }
+
+        guard let data = output.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
+              let first = json.first,
+              let name = first["name"] as? String else { return nil }
+
+        let status = first["status"] as? String ?? ""
+        let conclusion = first["conclusion"] as? String
+
+        let state: CIState
+        if status == "completed" {
+            switch conclusion {
+            case "success": state = .success
+            case "failure": state = .failure
+            case "cancelled": state = .cancelled
+            default: state = .unknown
+            }
+        } else if ["in_progress", "queued", "waiting", "requested", "pending"].contains(status) {
+            state = .pending
+        } else {
+            state = .unknown
+        }
+
+        return CIStatus(state: state, name: name)
+    }
+
+    private static func queryPRInfo(branch: String, cwd: String) -> PRInfo? {
+        guard let gh = findGH(),
+              let output = run(gh, args: ["pr", "list", "--head", branch, "--limit", "1",
+                                          "--json", "number,title,reviewDecision"], cwd: cwd, timeout: 5) else { return nil }
+
+        guard let data = output.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
+              let first = json.first,
+              let number = first["number"] as? Int,
+              let title = first["title"] as? String else { return nil }
+
+        return PRInfo(number: number, title: title, reviewDecision: first["reviewDecision"] as? String)
     }
 
     private static func git(_ args: [String], cwd: String) -> String? {
         run("/usr/bin/git", args: args, cwd: cwd)
     }
 
-    private static func run(_ executable: String, args: [String], cwd: String? = nil, checkExit: Bool = true) -> String? {
+    private static func run(_ executable: String, args: [String], cwd: String? = nil, checkExit: Bool = true, timeout: TimeInterval = 0) -> String? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = args
@@ -237,8 +382,18 @@ final class GitContextService {
         process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice
         do {
-            try process.run()
-            process.waitUntilExit()
+            if timeout > 0 {
+                let semaphore = DispatchSemaphore(value: 0)
+                process.terminationHandler = { _ in semaphore.signal() }
+                try process.run()
+                if semaphore.wait(timeout: .now() + timeout) == .timedOut {
+                    process.terminate()
+                    return nil
+                }
+            } else {
+                try process.run()
+                process.waitUntilExit()
+            }
             if checkExit { guard process.terminationStatus == 0 else { return nil } }
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
             let output = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
