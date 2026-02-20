@@ -17,7 +17,11 @@ final class KittyIPC: TextInjector {
         try await runKitten(kittenPath: kittenPath, socketArgs: socketArgs, text: text)
 
         if pressEnter {
-            try await sendEnterKey(kittenPath: kittenPath, socketArgs: socketArgs)
+            // Use send-text with \r (carriage return) rather than send-key,
+            // because send-key silently fails when the program uses kitty's
+            // progressive keyboard enhancement protocol (e.g. GitHub Copilot CLI).
+            // CR (0x0d) is what the Enter key actually produces in a terminal.
+            try await runKitten(kittenPath: kittenPath, socketArgs: socketArgs, text: "\r")
         }
 
         logger.info("Text sent via Kitty IPC successfully")
@@ -51,30 +55,6 @@ final class KittyIPC: TextInjector {
         }
     }
 
-    /// Sends an Enter keypress via `kitten @ send-key enter`.
-    private func sendEnterKey(kittenPath: String, socketArgs: [String]) async throws {
-        let result: (status: Int32, output: String) = try await Task.detached {
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: kittenPath)
-            process.arguments = ["@"] + socketArgs + ["send-key", "--match", "recent:0", "enter"]
-
-            let pipe = Pipe()
-            process.standardOutput = pipe
-            process.standardError = pipe
-
-            try process.run()
-            process.waitUntilExit()
-
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            let output = String(data: data, encoding: .utf8) ?? ""
-            return (process.terminationStatus, output)
-        }.value
-
-        if result.status != 0 {
-            logger.warning("Failed to send Enter key via Kitty IPC: \(result.output)")
-        }
-    }
-
     /// Build --to= argument if we can find the Kitty socket.
     private func socketArguments() -> [String] {
         // 1. Check KITTY_LISTEN_ON env var
@@ -83,9 +63,8 @@ final class KittyIPC: TextInjector {
             return ["--to", listenOn]
         }
 
-        // 2. Scan for unix sockets in the standard location
-        let socketDir = "/tmp/kitty-\(getuid())"
-        if let socket = findKittySocket(in: socketDir) {
+        // 2. Scan /tmp for kitty-* unix socket files (named by PID, e.g. /tmp/kitty-12345)
+        if let socket = findKittySocket() {
             let socketURL = "unix:\(socket)"
             logger.info("Found Kitty socket: \(socketURL)")
             return ["--to", socketURL]
@@ -96,17 +75,25 @@ final class KittyIPC: TextInjector {
         return []
     }
 
-    private func findKittySocket(in directory: String) -> String? {
+    private func findKittySocket() -> String? {
         let fm = FileManager.default
-        guard let contents = try? fm.contentsOfDirectory(atPath: directory) else { return nil }
+        guard let contents = try? fm.contentsOfDirectory(atPath: "/tmp") else { return nil }
 
-        // Prefer the most recently modified socket
+        let uid = getuid()
+        // Kitty creates sockets at /tmp/kitty-<pid> owned by the current user
         let sockets = contents
-            .map { "\(directory)/\($0)" }
+            .filter { $0.hasPrefix("kitty-") }
+            .map { "/tmp/\($0)" }
             .filter { path in
+                // Must be a socket (exists but is not a directory or regular file)
                 var isDir: ObjCBool = false
-                // Socket files exist but aren't regular files or directories
-                return fm.fileExists(atPath: path, isDirectory: &isDir) && !isDir.boolValue
+                guard fm.fileExists(atPath: path, isDirectory: &isDir), !isDir.boolValue else { return false }
+                // Must be owned by us
+                guard let attrs = try? fm.attributesOfItem(atPath: path),
+                      let ownerID = attrs[.ownerAccountID] as? UInt, ownerID == uid else { return false }
+                // Verify it's a socket via file type
+                guard let fileType = attrs[.type] as? FileAttributeType, fileType == .typeSocket else { return false }
+                return true
             }
             .sorted { a, b in
                 let aDate = (try? fm.attributesOfItem(atPath: a)[.modificationDate] as? Date) ?? .distantPast
