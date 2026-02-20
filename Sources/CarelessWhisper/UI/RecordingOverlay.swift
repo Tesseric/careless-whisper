@@ -95,6 +95,10 @@ struct RecordingOverlayView: View {
                         .foregroundStyle(.white.opacity(0.7))
                         .lineLimit(1)
                 }
+
+                if !context.stagedFiles.isEmpty || !context.unstagedFiles.isEmpty {
+                    GitStatusView(staged: context.stagedFiles, unstaged: context.unstagedFiles)
+                }
             }
 
             if appState.recordingState == .recording, !appState.liveTranscription.isEmpty {
@@ -114,6 +118,70 @@ struct RecordingOverlayView: View {
     private func formatDuration(_ duration: TimeInterval) -> String {
         let seconds = Int(duration)
         return String(format: "%d:%02d", seconds / 60, seconds % 60)
+    }
+}
+
+private struct GitStatusView: View {
+    let staged: [GitFileChange]
+    let unstaged: [GitFileChange]
+
+    private let maxFiles = 3
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if !staged.isEmpty {
+                fileSection("Staged", files: staged, dotColor: .green)
+            }
+            if !unstaged.isEmpty {
+                fileSection("Changes", files: unstaged, dotColor: .orange)
+            }
+        }
+    }
+
+    private func fileSection(_ title: String, files: [GitFileChange], dotColor: Color) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 5) {
+                Circle()
+                    .fill(dotColor.opacity(0.8))
+                    .frame(width: 6, height: 6)
+                Text("\(title) · \(files.count)")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.5))
+            }
+
+            ForEach(Array(files.prefix(maxFiles).enumerated()), id: \.offset) { _, file in
+                HStack(spacing: 6) {
+                    Text(file.type.letter)
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .foregroundStyle(statusColor(file.type))
+                        .frame(width: 12, alignment: .center)
+
+                    Text(file.displayName)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.65))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                .padding(.leading, 11)
+            }
+
+            if files.count > maxFiles {
+                Text("+\(files.count - maxFiles) more")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.white.opacity(0.35))
+                    .padding(.leading, 11)
+            }
+        }
+    }
+
+    private func statusColor(_ type: FileChangeType) -> Color {
+        switch type {
+        case .added:     return .green
+        case .modified:  return .cyan
+        case .deleted:   return .red
+        case .renamed:   return .purple
+        case .untracked: return Color.white.opacity(0.4)
+        }
     }
 }
 

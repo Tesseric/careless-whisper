@@ -1,12 +1,40 @@
 import Foundation
 import os
 
+enum FileChangeType {
+    case added, modified, deleted, renamed, untracked
+
+    var letter: String {
+        switch self {
+        case .added: return "A"
+        case .modified: return "M"
+        case .deleted: return "D"
+        case .renamed: return "R"
+        case .untracked: return "?"
+        }
+    }
+}
+
+struct GitFileChange {
+    let path: String
+    let type: FileChangeType
+
+    /// Short display name: last 2 path components for nested files, full path otherwise.
+    var displayName: String {
+        let components = path.split(separator: "/")
+        if components.count <= 2 { return path }
+        return components.suffix(2).joined(separator: "/")
+    }
+}
+
 /// Git repository context detected from the active terminal.
 struct GitContext {
     let repoName: String
     let branch: String
     let ownerAndRepo: String?
     let gitHubURL: String?
+    let stagedFiles: [GitFileChange]
+    let unstagedFiles: [GitFileChange]
 }
 
 /// Detects Git repository context from the active terminal's shell processes.
@@ -58,8 +86,10 @@ final class GitContextService {
                 }
             }
 
-            logger.info("Detected git context: \(repoName) @ \(branch)")
-            return GitContext(repoName: repoName, branch: branch, ownerAndRepo: ownerAndRepo, gitHubURL: gitHubURL)
+            let (staged, unstaged) = parseGitStatus(cwd: repoRoot)
+
+            logger.info("Detected git context: \(repoName) @ \(branch) — \(staged.count) staged, \(unstaged.count) unstaged")
+            return GitContext(repoName: repoName, branch: branch, ownerAndRepo: ownerAndRepo, gitHubURL: gitHubURL, stagedFiles: staged, unstagedFiles: unstaged)
         }
 
         return nil
@@ -126,6 +156,47 @@ final class GitContextService {
         }
 
         return nil
+    }
+
+    /// Parses `git status --porcelain` into staged and unstaged file changes.
+    private static func parseGitStatus(cwd: String) -> (staged: [GitFileChange], unstaged: [GitFileChange]) {
+        guard let output = git(["status", "--porcelain"], cwd: cwd) else { return ([], []) }
+
+        var staged: [GitFileChange] = []
+        var unstaged: [GitFileChange] = []
+
+        for line in output.split(separator: "\n", omittingEmptySubsequences: false) {
+            guard line.count >= 4 else { continue }
+            let x = line[line.startIndex]
+            let y = line[line.index(after: line.startIndex)]
+            var path = String(line.dropFirst(3))
+
+            // Renames: "old -> new" — show the new path
+            if let arrowRange = path.range(of: " -> ") {
+                path = String(path[arrowRange.upperBound...])
+            }
+
+            if x != " " && x != "?" {
+                staged.append(GitFileChange(path: path, type: charToChangeType(x)))
+            }
+
+            if y != " " {
+                let type: FileChangeType = (x == "?") ? .untracked : charToChangeType(y)
+                unstaged.append(GitFileChange(path: path, type: type))
+            }
+        }
+
+        return (staged, unstaged)
+    }
+
+    private static func charToChangeType(_ c: Character) -> FileChangeType {
+        switch c {
+        case "A": return .added
+        case "D": return .deleted
+        case "R": return .renamed
+        case "?": return .untracked
+        default:  return .modified
+        }
     }
 
     private static func git(_ args: [String], cwd: String) -> String? {
