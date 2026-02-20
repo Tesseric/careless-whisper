@@ -1,6 +1,54 @@
 import Foundation
 import os
 
+// MARK: - Kitty IPC Text Injection
+//
+// Injects transcribed text (and optionally an Enter key) into the active Kitty
+// terminal window using `kitten @` remote control commands over a Unix socket.
+//
+// ## Architecture
+//
+// Text is sent with `kitten @ send-text` and the Enter key with
+// `kitten @ send-key enter`. These are two fundamentally different mechanisms:
+//
+//   • send-text  – writes raw bytes into the pty (like typing characters).
+//   • send-key   – generates a key *event* that flows through kitty's keyboard
+//                   protocol, including progressive enhancement (CSI u).
+//
+// ## Why send-key for Enter (not send-text)
+//
+// Programs that opt into kitty's progressive keyboard enhancement protocol
+// (e.g. GitHub Copilot CLI) receive key events as structured escape sequences,
+// not raw bytes. A raw CR byte (0x0d) injected via send-text is silently
+// ignored by these programs. Additionally, kitten's send-text interprets
+// arguments with Python escaping rules, so a Swift "\r" (byte 0x0d) is not
+// the same as the two-character escape sequence "\\r" — the raw byte may be
+// dropped entirely. Using `send-key enter` avoids both problems.
+//
+// ## Timing
+//
+// A 200ms delay is inserted between the text injection and the Enter key.
+// Without this, the target program may not have finished reading/rendering
+// the injected text from the pty, causing the Enter key event to be lost.
+//
+// ## Socket Discovery
+//
+// When launched from a Kitty terminal, the app inherits `KITTY_LISTEN_ON`
+// and uses it directly. When launched from Finder/Spotlight (no env var),
+// it scans /tmp for `kitty-<pid>` Unix sockets owned by the current user.
+// The `--to` flag is required for `kitten @` when running outside Kitty.
+//
+// ## kitty.conf Requirements
+//
+//   allow_remote_control socket-only
+//   listen_on unix:/tmp/kitty-{kitty_pid}
+//
+// ## Silent Failures
+//
+// Both send-text and send-key always exit 0 even if no text/key was
+// delivered. Errors (wrong window match, unsupported key mode) are not
+// reported. The only detectable failures are socket/connection errors.
+
 final class KittyIPC: TextInjector {
     private let logger = Logger(subsystem: "com.carelesswhisper", category: "KittyIPC")
 
