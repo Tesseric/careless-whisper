@@ -12,10 +12,10 @@ final class RecordingOverlayController {
         let overlayView = RecordingOverlayView()
             .environmentObject(appState)
         let hosting = NSHostingView(rootView: overlayView)
-        hosting.frame = NSRect(x: 0, y: 0, width: 320, height: 60)
+        hosting.frame = NSRect(x: 0, y: 0, width: 420, height: 60)
 
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 320, height: 200),
+            contentRect: NSRect(x: 0, y: 0, width: 420, height: 200),
             styleMask: [.nonactivatingPanel, .hudWindow],
             backing: .buffered,
             defer: false
@@ -31,7 +31,7 @@ final class RecordingOverlayController {
         // Position: top-center of main screen
         if let screen = NSScreen.main {
             let screenFrame = screen.visibleFrame
-            let x = screenFrame.midX - 160
+            let x = screenFrame.midX - 210
             let y = screenFrame.maxY - 80
             panel.setFrameOrigin(NSPoint(x: x, y: y))
         }
@@ -115,17 +115,15 @@ struct RecordingOverlayView: View {
 
                 // Last commit
                 if let commit = context.lastCommit {
-                    HStack(spacing: 4) {
+                    VStack(alignment: .leading, spacing: 2) {
                         Text(commit.message)
                             .font(.system(size: 10))
                             .foregroundStyle(.white.opacity(0.45))
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                        Spacer()
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
                         Text(commit.relativeTime)
                             .font(.system(size: 9))
                             .foregroundStyle(.white.opacity(0.35))
-                            .layoutPriority(1)
                     }
                 }
 
@@ -158,8 +156,8 @@ struct RecordingOverlayView: View {
                     }
                 }
 
-                // Diff preview
-                if let diff = context.diffPreview {
+                // Diff previews
+                ForEach(Array(context.diffPreviews.enumerated()), id: \.offset) { _, diff in
                     DiffPreviewView(preview: diff)
                 }
             }
@@ -174,7 +172,7 @@ struct RecordingOverlayView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .frame(width: 320, alignment: .leading)
+        .frame(width: 420, alignment: .leading)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
     }
 
@@ -343,9 +341,11 @@ private struct DiffPreviewView: View {
                 .foregroundStyle(.white.opacity(0.4))
 
             ForEach(Array(preview.lines.enumerated()), id: \.offset) { _, line in
-                Text("\(line.kind == .added ? "+" : "−") \(line.text)")
+                let prefix = line.kind == .added ? "+" : line.kind == .removed ? "−" : " "
+                let color: Color = line.kind == .added ? .green.opacity(0.7) : line.kind == .removed ? .red.opacity(0.7) : .white.opacity(0.35)
+                Text("\(prefix) \(line.text)")
                     .font(.system(size: 9, design: .monospaced))
-                    .foregroundStyle(line.kind == .added ? .green.opacity(0.7) : .red.opacity(0.7))
+                    .foregroundStyle(color)
                     .lineLimit(1)
                     .truncationMode(.tail)
             }

@@ -39,7 +39,7 @@ struct GitContext {
     let aheadBehind: AheadBehind?
     let lastCommit: LastCommit?
     let stashCount: Int
-    let diffPreview: DiffPreview?
+    let diffPreviews: [DiffPreview]
     let ciStatus: CIStatus?
     let prInfo: PRInfo?
 }
@@ -70,7 +70,7 @@ struct PRInfo {
 }
 
 struct DiffLine {
-    enum Kind { case added, removed }
+    enum Kind { case added, removed, context }
     let kind: Kind
     let text: String
 }
@@ -134,7 +134,7 @@ final class GitContextService {
             let aheadBehind = parseAheadBehind(branch: branch, cwd: repoRoot)
             let lastCommit = parseLastCommit(cwd: repoRoot)
             let stashCount = countStashes(cwd: repoRoot)
-            let diffPreview = parseDiffPreview(unstagedFiles: unstaged, cwd: repoRoot)
+            let diffPreviews = parseDiffPreviews(unstagedFiles: unstaged, cwd: repoRoot)
             let ciStatus = queryCIStatus(branch: branch, cwd: repoRoot)
             let prInfo = queryPRInfo(branch: branch, cwd: repoRoot)
 
@@ -144,7 +144,7 @@ final class GitContextService {
                 ownerAndRepo: ownerAndRepo, gitHubURL: gitHubURL,
                 stagedFiles: staged, unstagedFiles: unstaged, branchFiles: branchFiles,
                 aheadBehind: aheadBehind, lastCommit: lastCommit, stashCount: stashCount,
-                diffPreview: diffPreview, ciStatus: ciStatus, prInfo: prInfo
+                diffPreviews: diffPreviews, ciStatus: ciStatus, prInfo: prInfo
             )
         }
 
@@ -302,20 +302,29 @@ final class GitContextService {
         return output.split(separator: "\n").count
     }
 
-    private static func parseDiffPreview(unstagedFiles: [GitFileChange], cwd: String) -> DiffPreview? {
-        guard let file = unstagedFiles.first(where: { $0.type == .modified }) else { return nil }
-        guard let output = git(["diff", "-U0", "--no-color", "--", file.path], cwd: cwd) else { return nil }
+    private static func parseDiffPreviews(unstagedFiles: [GitFileChange], cwd: String) -> [DiffPreview] {
+        let modifiedFiles = unstagedFiles.filter { $0.type == .modified }
+        var previews: [DiffPreview] = []
 
-        var lines: [DiffLine] = []
-        for line in output.split(separator: "\n", omittingEmptySubsequences: false) {
-            if line.hasPrefix("+") && !line.hasPrefix("+++") {
-                lines.append(DiffLine(kind: .added, text: String(line.dropFirst())))
-            } else if line.hasPrefix("-") && !line.hasPrefix("---") {
-                lines.append(DiffLine(kind: .removed, text: String(line.dropFirst())))
+        for file in modifiedFiles {
+            guard let output = git(["diff", "-U3", "--no-color", "--", file.path], cwd: cwd) else { continue }
+
+            var lines: [DiffLine] = []
+            for line in output.split(separator: "\n", omittingEmptySubsequences: false) {
+                if line.hasPrefix("+") && !line.hasPrefix("+++") {
+                    lines.append(DiffLine(kind: .added, text: String(line.dropFirst())))
+                } else if line.hasPrefix("-") && !line.hasPrefix("---") {
+                    lines.append(DiffLine(kind: .removed, text: String(line.dropFirst())))
+                } else if line.hasPrefix(" ") && !lines.isEmpty {
+                    lines.append(DiffLine(kind: .context, text: String(line.dropFirst())))
+                }
+                if lines.count >= 8 { break }
             }
-            if lines.count >= 4 { break }
+            if !lines.isEmpty {
+                previews.append(DiffPreview(fileName: file.displayName, lines: lines))
+            }
         }
-        return lines.isEmpty ? nil : DiffPreview(fileName: file.displayName, lines: lines)
+        return previews
     }
 
     // MARK: - GitHub CLI

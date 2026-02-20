@@ -231,7 +231,7 @@ final class AppState: ObservableObject {
             do {
                 let text = try await whisperService.transcribe(samples: chunk)
                 let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !trimmed.isEmpty {
+                if !trimmed.isEmpty && !Self.isSilenceMarker(trimmed) {
                     if liveTranscription.isEmpty {
                         liveTranscription = trimmed
                     } else {
@@ -287,7 +287,7 @@ final class AppState: ObservableObject {
                 do {
                     let text = try await whisperService.transcribe(samples: finalChunkSamples)
                     let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !trimmed.isEmpty {
+                    if !trimmed.isEmpty && !Self.isSilenceMarker(trimmed) {
                         if liveTranscription.isEmpty {
                             liveTranscription = trimmed
                         } else {
@@ -326,6 +326,27 @@ final class AppState: ObservableObject {
                 NSSound.tink?.play()
             }
         }
+    }
+
+    /// Whisper hallucinates bracketed markers like "[silence]", "(silence)", "[BLANK_AUDIO]" etc.
+    /// when it hears no speech — filter these out.
+    private static func isSilenceMarker(_ text: String) -> Bool {
+        let lower = text.lowercased()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: .punctuationCharacters)
+        let markers: Set<String> = [
+            "silence", "blank audio", "blank_audio", "no speech", "no audio",
+            "inaudible", "music", "background noise", "noise",
+            "applause", "laughter",
+        ]
+        // Match both "[silence]" and bare "silence" etc.
+        let stripped = lower
+            .replacingOccurrences(of: "[", with: "")
+            .replacingOccurrences(of: "]", with: "")
+            .replacingOccurrences(of: "(", with: "")
+            .replacingOccurrences(of: ")", with: "")
+            .trimmingCharacters(in: .whitespaces)
+        return markers.contains(stripped)
     }
 }
 
