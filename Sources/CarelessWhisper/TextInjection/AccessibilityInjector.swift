@@ -21,7 +21,27 @@ final class AccessibilityInjector: TextInjector {
     func injectText(_ text: String, pressEnter: Bool) async throws {
         let element = try focusedTextElement()
 
-        // Read existing value so we can append at the insertion point.
+        // Try the best available insertion strategy.
+        if canSetValue(of: element) {
+            try injectViaSetValue(text, element: element)
+        } else if canSetSelectedText(of: element) {
+            try injectViaSelectedText(text, element: element)
+        } else {
+            throw AXInjectionError.valueNotSettable
+        }
+
+        logger.info("Text injected via Accessibility API, length=\(text.count)")
+
+        if pressEnter {
+            try await Task.sleep(nanoseconds: 50_000_000) // 50ms
+            simulateReturnKey()
+        }
+    }
+
+    // MARK: - Injection strategies
+
+    /// Strategy 1: Set the full value — works in native macOS text fields.
+    private func injectViaSetValue(_ text: String, element: AXUIElement) throws {
         let existingValue = try? currentValue(of: element)
         let insertionLocation = try? insertionPointLocation(of: element)
 
@@ -57,13 +77,35 @@ final class AccessibilityInjector: TextInjector {
                 rangeValue
             )
         }
+    }
 
-        logger.info("Text injected via Accessibility API, length=\(text.count)")
-
-        if pressEnter {
-            try await Task.sleep(nanoseconds: 50_000_000) // 50ms
-            simulateReturnKey()
+    /// Strategy 2: Replace the current selection with our text — works in
+    /// browser web-content fields (Chrome, Firefox) where AXValue is read-only
+    /// but AXSelectedText is writable.
+    private func injectViaSelectedText(_ text: String, element: AXUIElement) throws {
+        // Collapse selection to insertion point so we insert rather than replace.
+        if let location = try? insertionPointLocation(of: element) {
+            var range = CFRangeMake(location, 0)
+            if let rangeValue = AXValueCreate(.cfRange, &range) {
+                AXUIElementSetAttributeValue(
+                    element,
+                    kAXSelectedTextRangeAttribute as CFString,
+                    rangeValue
+                )
+            }
         }
+
+        let result = AXUIElementSetAttributeValue(
+            element,
+            kAXSelectedTextAttribute as CFString,
+            text as CFTypeRef
+        )
+
+        guard result == .success else {
+            throw AXInjectionError.setValueFailed(result)
+        }
+
+        logger.info("Used AXSelectedText insertion strategy")
     }
 
     // MARK: - Private helpers
@@ -97,14 +139,24 @@ final class AccessibilityInjector: TextInjector {
             throw AXInjectionError.notATextField(role)
         }
 
-        // Verify the value attribute is settable.
-        var settable: DarwinBoolean = false
-        AXUIElementIsAttributeSettable(element, kAXValueAttribute as CFString, &settable)
-        guard settable.boolValue else {
+        // At least one of our injection strategies must be available.
+        guard canSetValue(of: element) || canSetSelectedText(of: element) else {
             throw AXInjectionError.valueNotSettable
         }
 
         return element
+    }
+
+    private func canSetValue(of element: AXUIElement) -> Bool {
+        var settable: DarwinBoolean = false
+        AXUIElementIsAttributeSettable(element, kAXValueAttribute as CFString, &settable)
+        return settable.boolValue
+    }
+
+    private func canSetSelectedText(of element: AXUIElement) -> Bool {
+        var settable: DarwinBoolean = false
+        AXUIElementIsAttributeSettable(element, kAXSelectedTextAttribute as CFString, &settable)
+        return settable.boolValue
     }
 
     private func currentValue(of element: AXUIElement) throws -> String {
