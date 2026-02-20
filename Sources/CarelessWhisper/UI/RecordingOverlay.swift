@@ -187,7 +187,7 @@ private struct GitStatusView: View {
     let unstaged: [GitFileChange]
     let branch: [GitFileChange]
 
-    private let maxFiles = 3
+    private let maxFiles = 10
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
