@@ -4,6 +4,8 @@ A macOS menu bar app for **push-to-talk voice-to-text** built for developers who
 
 When you're pair-programming with an AI agent and your hands are on the keyboard, Careless Whisper gives you a voice channel to your tools. Hold a hotkey, speak, release — your words appear exactly where your cursor is.
 
+![Careless Whisper recording overlay](assets/overlay.png)
+
 ## How It Works
 
 1. **Hold a hotkey** (default: `Option+`\`) → the mic starts recording and a floating HUD overlay appears
