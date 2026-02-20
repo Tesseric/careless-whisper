@@ -10,6 +10,7 @@ protocol TextInjector {
 final class TextInjectorCoordinator {
     private let logger = Logger(subsystem: "com.carelesswhisper", category: "TextInjector")
     private let kittyIPC = KittyIPC()
+    private let accessibilityInjector = AccessibilityInjector()
     private let clipboardPaster = ClipboardPaster()
 
     static let kittyBundleID = "net.kovidgoyal.kitty"
@@ -22,16 +23,27 @@ final class TextInjectorCoordinator {
     }
 
     func injectText(_ text: String, targetBundleID: String?, pressEnter: Bool = false) async {
+        // 1. Kitty terminal: use direct IPC via Unix socket.
         if targetBundleID == Self.kittyBundleID {
             do {
                 try await kittyIPC.injectText(text, pressEnter: pressEnter)
                 logger.info("Text injected via Kitty IPC")
                 return
             } catch {
-                logger.warning("Kitty IPC failed, falling back to clipboard: \(error, privacy: .public)")
+                logger.warning("Kitty IPC failed, falling back: \(error, privacy: .public)")
             }
         }
 
+        // 2. Accessibility API: directly set the focused text field's value.
+        do {
+            try await accessibilityInjector.injectText(text, pressEnter: pressEnter)
+            logger.info("Text injected via Accessibility API")
+            return
+        } catch {
+            logger.info("Accessibility injection unavailable, falling back to clipboard: \(error, privacy: .public)")
+        }
+
+        // 3. Clipboard paste: universal fallback.
         do {
             try await clipboardPaster.injectText(text, pressEnter: pressEnter)
             logger.info("Text injected via clipboard+paste")
