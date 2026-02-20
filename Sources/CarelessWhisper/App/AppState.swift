@@ -41,6 +41,8 @@ final class AppState: ObservableObject {
 
     @AppStorage("selectedModel") var selectedModelRaw: String = WhisperModel.baseEn.rawValue
     @AppStorage("completionSound") var completionSoundEnabled: Bool = true
+    @AppStorage("selectedInputDevice") var selectedInputDeviceID: Int = 0
+    @AppStorage("autoEnter") var autoEnter: Bool = false
 
     var selectedModel: WhisperModel {
         WhisperModel(rawValue: selectedModelRaw) ?? .baseEn
@@ -96,6 +98,12 @@ final class AppState: ObservableObject {
 
         await loadModel()
         hotKeyManager.register()
+
+        // Restore persisted audio input device
+        if selectedInputDeviceID != 0 {
+            audioCaptureService.selectedDeviceID = UInt32(selectedInputDeviceID)
+        }
+
         hasCompletedOnboarding = true
     }
 
@@ -299,7 +307,7 @@ final class AppState: ObservableObject {
             overlayController.dismiss()
 
             let bundleID = targetBundleID
-            await textInjector.injectText(finalText, targetBundleID: bundleID)
+            await textInjector.injectText(finalText, targetBundleID: bundleID, pressEnter: autoEnter)
 
             if completionSoundEnabled {
                 NSSound.tink?.play()

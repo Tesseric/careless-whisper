@@ -3,7 +3,7 @@ import AppKit
 import os
 
 protocol TextInjector {
-    func injectText(_ text: String) async throws
+    func injectText(_ text: String, pressEnter: Bool) async throws
 }
 
 @MainActor
@@ -21,10 +21,10 @@ final class TextInjectorCoordinator {
         return bundleID
     }
 
-    func injectText(_ text: String, targetBundleID: String?) async {
+    func injectText(_ text: String, targetBundleID: String?, pressEnter: Bool = false) async {
         if targetBundleID == Self.kittyBundleID {
             do {
-                try await kittyIPC.injectText(text)
+                try await kittyIPC.injectText(text, pressEnter: pressEnter)
                 logger.info("Text injected via Kitty IPC")
                 return
             } catch {
@@ -33,7 +33,7 @@ final class TextInjectorCoordinator {
         }
 
         do {
-            try await clipboardPaster.injectText(text)
+            try await clipboardPaster.injectText(text, pressEnter: pressEnter)
             logger.info("Text injected via clipboard+paste")
         } catch {
             logger.error("Clipboard paste failed: \(error, privacy: .public)")

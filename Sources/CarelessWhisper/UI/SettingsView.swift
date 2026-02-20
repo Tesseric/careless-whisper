@@ -115,7 +115,10 @@ struct SettingsView: View {
             } else {
                 Picker("", selection: Binding(
                     get: { appState.audioCaptureService.selectedDeviceID ?? 0 },
-                    set: { appState.audioCaptureService.selectedDeviceID = $0 == 0 ? nil : $0 }
+                    set: {
+                        appState.audioCaptureService.selectedDeviceID = $0 == 0 ? nil : $0
+                        appState.selectedInputDeviceID = Int($0)
+                    }
                 )) {
                     Text("System Default").tag(UInt32(0))
                     ForEach(devices) { device in
@@ -135,6 +138,8 @@ struct SettingsView: View {
                 .font(.headline)
 
             Toggle("Play sound on completion", isOn: $completionSound)
+
+            Toggle("Press Enter after transcription", isOn: $appState.autoEnter)
 
             Toggle("Launch at login", isOn: $launchAtLogin)
                 .onChange(of: launchAtLogin) { _, newValue in
