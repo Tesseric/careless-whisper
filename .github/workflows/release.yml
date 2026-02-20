@@ -1,0 +1,56 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build (release)
+        run: swift build -c release
+
+      - name: Run tests
+        run: swift test
+
+      - name: Bundle app
+        run: ./scripts/bundle.sh --release --version "${{ steps.version.outputs.version }}"
+
+      - name: Prepare artifact
+        run: |
+          mkdir -p staging
+          cp -R "build/Careless Whisper.app" staging/
+          cp Sources/CarelessWhisper/CarelessWhisper.entitlements staging/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-app
+          path: staging/
+
+  release:
+    needs: build
+    uses: Tesseric/.github/.github/workflows/macos-sign-release.yml@main
+    with:
+      artifact-name: macos-app
+      app-name: Careless Whisper
+      app-bundle-path: Careless Whisper.app
+      archive-name-prefix: careless-whisper
+      package-format: zip
+      entitlements-path: CarelessWhisper.entitlements
+      homebrew-tap-repo: Tesseric/homebrew-careless-whisper
+      homebrew-cask-name: careless-whisper
+      homebrew-cask-desc: "Local push-to-talk voice-to-text for macOS"
+    secrets: inherit
