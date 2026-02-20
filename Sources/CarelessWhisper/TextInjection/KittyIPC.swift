@@ -17,11 +17,14 @@ final class KittyIPC: TextInjector {
         try await runKitten(kittenPath: kittenPath, socketArgs: socketArgs, text: text)
 
         if pressEnter {
-            // Use send-text with \r (carriage return) rather than send-key,
-            // because send-key silently fails when the program uses kitty's
-            // progressive keyboard enhancement protocol (e.g. GitHub Copilot CLI).
-            // CR (0x0d) is what the Enter key actually produces in a terminal.
-            try await runKitten(kittenPath: kittenPath, socketArgs: socketArgs, text: "\r")
+            // Delay to let the target program process the injected text.
+            // Programs like GitHub Copilot CLI need time to read and render
+            // the text from the pty before they can accept a key event.
+            // Longer text requires more processing time.
+            try await Task.sleep(nanoseconds: 200_000_000) // 200ms
+            logger.info("Sending Enter key via send-key")
+            try await sendEnterKey(kittenPath: kittenPath, socketArgs: socketArgs)
+            logger.info("Enter key sent via send-key")
         }
 
         logger.info("Text sent via Kitty IPC successfully")
@@ -52,6 +55,33 @@ final class KittyIPC: TextInjector {
                 throw KittyIPCError.remoteControlDisabled
             }
             throw KittyIPCError.kittenFailed(result.output)
+        }
+    }
+
+    /// Sends an Enter key event via `kitten @ send-key`.
+    /// Unlike send-text, send-key generates actual key events that are
+    /// delivered through kitty's keyboard protocol, which is required for
+    /// programs using progressive keyboard enhancement (e.g. GitHub Copilot CLI).
+    private func sendEnterKey(kittenPath: String, socketArgs: [String]) async throws {
+        let result: (status: Int32, output: String) = try await Task.detached {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: kittenPath)
+            process.arguments = ["@"] + socketArgs + ["send-key", "--match", "recent:0", "enter"]
+
+            let pipe = Pipe()
+            process.standardOutput = pipe
+            process.standardError = pipe
+
+            try process.run()
+            process.waitUntilExit()
+
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            let output = String(data: data, encoding: .utf8) ?? ""
+            return (process.terminationStatus, output)
+        }.value
+
+        if result.status != 0 {
+            logger.warning("Failed to send Enter key via Kitty IPC: \(result.output)")
         }
     }
 
