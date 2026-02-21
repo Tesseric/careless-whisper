@@ -151,13 +151,9 @@ enum AgentSkillInstaller {
       TOKEN=$(jq -r '.token' "$SERVER_JSON")
       PID=$(jq -r '.pid' "$SERVER_JSON")
     else
-      eval "$(python3 -c "
-    import json, sys
-    d = json.load(open(sys.argv[1]))
-    print(f'PORT={d[\"port\"]}')
-    print(f'TOKEN={d[\"token\"]}')
-    print(f'PID={d[\"pid\"]}')
-    " "$SERVER_JSON")"
+      PORT=$(python3 -c 'import json, sys; d = json.load(open(sys.argv[1])); print(d["port"])' "$SERVER_JSON")
+      TOKEN=$(python3 -c 'import json, sys; d = json.load(open(sys.argv[1])); print(d["token"])' "$SERVER_JSON")
+      PID=$(python3 -c 'import json, sys; d = json.load(open(sys.argv[1])); print(d["pid"])' "$SERVER_JSON")
     fi
 
     # Verify the server process is alive
