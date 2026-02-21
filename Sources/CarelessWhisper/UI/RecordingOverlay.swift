@@ -1,18 +1,20 @@
 import SwiftUI
 import AppKit
+import Combine
 
-/// Floating HUD shown during recording — non-activating so it doesn't steal focus.
+/// Floating HUD shown during recording or when agent widgets are present — non-activating so it doesn't steal focus.
 @MainActor
-final class RecordingOverlayController {
+final class OverlayController {
     private var panel: NSPanel?
+    private var heightSubscription: AnyCancellable?
 
     func show(appState: AppState) {
+        // Idempotent: if panel already exists, SwiftUI reactivity handles content changes
         guard panel == nil else { return }
 
-        let overlayView = RecordingOverlayView()
+        let overlayView = OverlayContentView()
             .environmentObject(appState)
         let hosting = NSHostingView(rootView: overlayView)
-        hosting.frame = NSRect(x: 0, y: 0, width: 420, height: 60)
 
         let panel = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: 420, height: 200),
@@ -38,128 +40,71 @@ final class RecordingOverlayController {
 
         panel.orderFrontRegardless()
         self.panel = panel
+
+        // Resize panel when widget content height changes
+        heightSubscription = appState.$widgetContentHeight
+            .dropFirst()
+            .removeDuplicates()
+            .sink { [weak self] height in
+                self?.resizePanel(forWidgetHeight: height)
+            }
     }
 
     func dismiss() {
+        heightSubscription?.cancel()
+        heightSubscription = nil
         panel?.close()
         panel = nil
     }
+
+    /// Resize the panel based on the JS-reported widget content height plus padding.
+    private func resizePanel(forWidgetHeight widgetHeight: CGFloat) {
+        guard let panel else { return }
+
+        // VStack vertical padding (10 top + 10 bottom) + some margin
+        let totalHeight = widgetHeight + 24
+
+        let maxHeight: CGFloat
+        if let screen = panel.screen ?? NSScreen.main {
+            maxHeight = screen.visibleFrame.height - 40
+        } else {
+            maxHeight = 800
+        }
+
+        var frame = panel.frame
+        let oldTop = frame.maxY
+        frame.size.height = min(totalHeight, maxHeight)
+        frame.origin.y = oldTop - frame.size.height
+        panel.setFrame(frame, display: true, animate: false)
+    }
 }
 
-struct RecordingOverlayView: View {
+// MARK: - Overlay Content View
+
+struct OverlayContentView: View {
     @EnvironmentObject var appState: AppState
+    @State private var webViewHeight: CGFloat = 60
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 12) {
-                Circle()
-                    .fill(appState.recordingState == .recording ? .red : .orange)
-                    .frame(width: 12, height: 12)
-                    .overlay {
-                        if appState.recordingState == .recording {
-                            Circle()
-                                .fill(.red.opacity(0.4))
-                                .frame(width: 20, height: 20)
-                                .modifier(PulseModifier())
-                        }
-                    }
-
-                Text(appState.recordingState == .recording ? "Recording" : "Transcribing...")
-                    .font(.system(.body, weight: .medium))
-                    .foregroundStyle(.white)
-
-                Spacer()
-
-                if appState.recordingState == .recording {
-                    Text(formatDuration(appState.recordingDuration))
-                        .font(.system(.caption, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.7))
-                }
+            if appState.recordingState != .idle {
+                RecordingStatusBar(
+                    recordingState: appState.recordingState,
+                    duration: appState.recordingDuration
+                )
             }
 
-            if let context = appState.gitContext {
-                // Repo / branch + ahead/behind
-                HStack(spacing: 6) {
-                    Image(systemName: "arrow.triangle.branch")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.white.opacity(0.6))
+            if appState.gitContext != nil && appState.agentWidgets.isEmpty {
+                GitContextView(context: appState.gitContext!)
+            }
 
-                    Text(context.repoName)
-                        .font(.system(.caption, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.8))
-
-                    Text("/")
-                        .foregroundStyle(.white.opacity(0.4))
-
-                    Text(context.branch)
-                        .font(.system(.caption, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.7))
-                        .lineLimit(1)
-
-                    if let ab = context.aheadBehind, ab.ahead > 0 || ab.behind > 0 {
-                        Spacer()
-                        HStack(spacing: 4) {
-                            if ab.ahead > 0 {
-                                Text("↑\(ab.ahead)")
-                                    .font(.system(size: 10, weight: .medium, design: .monospaced))
-                                    .foregroundStyle(.green.opacity(0.7))
-                            }
-                            if ab.behind > 0 {
-                                Text("↓\(ab.behind)")
-                                    .font(.system(size: 10, weight: .medium, design: .monospaced))
-                                    .foregroundStyle(.orange.opacity(0.7))
-                            }
-                        }
+            if !appState.agentWidgets.isEmpty {
+                let composed = HTMLComposer.compose(widgets: appState.agentWidgets)
+                WidgetWebView(html: composed, contentHeight: $webViewHeight)
+                    .frame(height: webViewHeight)
+                    .onChange(of: webViewHeight) { _, newHeight in
+                        appState.widgetContentHeight = newHeight
                     }
-                }
-
-                // Last commit
-                if let commit = context.lastCommit {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(commit.message)
-                            .font(.system(size: 10))
-                            .foregroundStyle(.white.opacity(0.45))
-                            .lineLimit(2)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Text(commit.relativeTime)
-                            .font(.system(size: 9))
-                            .foregroundStyle(.white.opacity(0.35))
-                    }
-                }
-
-                // CI + PR status
-                if context.ciStatus != nil || context.prInfo != nil {
-                    HStack(spacing: 8) {
-                        if let ci = context.ciStatus {
-                            CIBadgeView(ci: ci)
-                        }
-                        if let pr = context.prInfo {
-                            PRBadgeView(pr: pr)
-                        }
-                    }
-                }
-
-                // File sections
-                if !context.stagedFiles.isEmpty || !context.unstagedFiles.isEmpty || !context.branchFiles.isEmpty {
-                    GitStatusView(staged: context.stagedFiles, unstaged: context.unstagedFiles, branch: context.branchFiles)
-                }
-
-                // Stash count
-                if context.stashCount > 0 {
-                    HStack(spacing: 4) {
-                        Image(systemName: "archivebox")
-                            .font(.system(size: 9))
-                            .foregroundStyle(.white.opacity(0.5))
-                        Text("\(context.stashCount) stash\(context.stashCount == 1 ? "" : "es")")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.white.opacity(0.45))
-                    }
-                }
-
-                // Diff previews
-                ForEach(Array(context.diffPreviews.enumerated()), id: \.offset) { _, diff in
-                    DiffPreviewView(preview: diff)
-                }
             }
 
             if appState.recordingState == .recording, !appState.liveTranscription.isEmpty {
@@ -175,12 +120,142 @@ struct RecordingOverlayView: View {
         .frame(width: 420, alignment: .leading)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
     }
+}
+
+// MARK: - Recording Status Bar
+
+struct RecordingStatusBar: View {
+    let recordingState: RecordingState
+    let duration: TimeInterval
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Circle()
+                .fill(recordingState == .recording ? .red : .orange)
+                .frame(width: 12, height: 12)
+                .overlay {
+                    if recordingState == .recording {
+                        Circle()
+                            .fill(.red.opacity(0.4))
+                            .frame(width: 20, height: 20)
+                            .modifier(PulseModifier())
+                    }
+                }
+
+            Text(recordingState == .recording ? "Recording" : "Transcribing...")
+                .font(.system(.body, weight: .medium))
+                .foregroundStyle(.white)
+
+            Spacer()
+
+            if recordingState == .recording {
+                Text(formatDuration(duration))
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.7))
+            }
+        }
+    }
 
     private func formatDuration(_ duration: TimeInterval) -> String {
         let seconds = Int(duration)
         return String(format: "%d:%02d", seconds / 60, seconds % 60)
     }
 }
+
+// MARK: - Git Context View
+
+private struct GitContextView: View {
+    let context: GitContext
+
+    var body: some View {
+        Group {
+            // Repo / branch + ahead/behind
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.triangle.branch")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.white.opacity(0.6))
+
+                Text(context.repoName)
+                    .font(.system(.caption, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.8))
+
+                Text("/")
+                    .foregroundStyle(.white.opacity(0.4))
+
+                Text(context.branch)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.7))
+                    .lineLimit(1)
+
+                if let ab = context.aheadBehind, ab.ahead > 0 || ab.behind > 0 {
+                    Spacer()
+                    HStack(spacing: 4) {
+                        if ab.ahead > 0 {
+                            Text("↑\(ab.ahead)")
+                                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                .foregroundStyle(.green.opacity(0.7))
+                        }
+                        if ab.behind > 0 {
+                            Text("↓\(ab.behind)")
+                                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                .foregroundStyle(.orange.opacity(0.7))
+                        }
+                    }
+                }
+            }
+
+            // Last commit
+            if let commit = context.lastCommit {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(commit.message)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.white.opacity(0.45))
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(commit.relativeTime)
+                        .font(.system(size: 9))
+                        .foregroundStyle(.white.opacity(0.35))
+                }
+            }
+
+            // CI + PR status
+            if context.ciStatus != nil || context.prInfo != nil {
+                HStack(spacing: 8) {
+                    if let ci = context.ciStatus {
+                        CIBadgeView(ci: ci)
+                    }
+                    if let pr = context.prInfo {
+                        PRBadgeView(pr: pr)
+                    }
+                }
+            }
+
+            // File sections
+            if !context.stagedFiles.isEmpty || !context.unstagedFiles.isEmpty || !context.branchFiles.isEmpty {
+                GitStatusView(staged: context.stagedFiles, unstaged: context.unstagedFiles, branch: context.branchFiles)
+            }
+
+            // Stash count
+            if context.stashCount > 0 {
+                HStack(spacing: 4) {
+                    Image(systemName: "archivebox")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.white.opacity(0.5))
+                    Text("\(context.stashCount) stash\(context.stashCount == 1 ? "" : "es")")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.white.opacity(0.45))
+                }
+            }
+
+            // Diff previews
+            ForEach(Array(context.diffPreviews.enumerated()), id: \.offset) { _, diff in
+                DiffPreviewView(preview: diff)
+            }
+        }
+    }
+}
+
+// MARK: - Git Status View
 
 private struct GitStatusView: View {
     let staged: [GitFileChange]
@@ -250,6 +325,8 @@ private struct GitStatusView: View {
     }
 }
 
+// MARK: - CI Badge
+
 private struct CIBadgeView: View {
     let ci: CIStatus
 
@@ -294,6 +371,8 @@ private struct CIBadgeView: View {
     }
 }
 
+// MARK: - PR Badge
+
 private struct PRBadgeView: View {
     let pr: PRInfo
 
@@ -331,6 +410,8 @@ private struct PRBadgeView: View {
     }
 }
 
+// MARK: - Diff Preview
+
 private struct DiffPreviewView: View {
     let preview: DiffPreview
 
@@ -356,6 +437,8 @@ private struct DiffPreviewView: View {
         .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 6))
     }
 }
+
+// MARK: - Pulse Animation
 
 private struct PulseModifier: ViewModifier {
     @State private var isPulsing = false

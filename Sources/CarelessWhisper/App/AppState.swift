@@ -24,6 +24,9 @@ final class AppState: ObservableObject {
     @Published var hotkeyDescription: String = ""
     @Published var liveTranscription: String = ""
     @Published var gitContext: GitContext?
+    @Published var agentWidgets: [AgentWidget] = []
+    @Published var overlayServerPort: UInt16 = 0
+    @Published var widgetContentHeight: CGFloat = 0
 
     let audioCaptureService = AudioCaptureService()
     let whisperService = WhisperService()
@@ -31,7 +34,8 @@ final class AppState: ObservableObject {
     let hotKeyManager = HotKeyManager()
     let textInjector = TextInjectorCoordinator()
     let permissionChecker = PermissionChecker()
-    private let overlayController = RecordingOverlayController()
+    private let overlayController = OverlayController()
+    let overlayServer = OverlayServer()
     let settingsWindowController = SettingsWindowController()
 
     private var recordingStartTime: Date?
@@ -44,9 +48,14 @@ final class AppState: ObservableObject {
     @AppStorage("completionSound") var completionSoundEnabled: Bool = true
     @AppStorage("selectedInputDevice") var selectedInputDeviceID: Int = 0
     @AppStorage("autoEnter") var autoEnter: Bool = false
+    @AppStorage("agentOverlayEnabled") var agentOverlayEnabled: Bool = false
 
     var selectedModel: WhisperModel {
         WhisperModel(rawValue: selectedModelRaw) ?? .baseEn
+    }
+
+    var shouldShowOverlay: Bool {
+        recordingState != .idle || !agentWidgets.isEmpty
     }
 
     var menuBarIcon: String {
@@ -111,6 +120,84 @@ final class AppState: ObservableObject {
     func openSettings() {
         logger.info("Opening settings window")
         settingsWindowController.open(appState: self)
+    }
+
+    // MARK: - Agent Overlay Lifecycle
+
+    func enableAgentOverlay() {
+        agentOverlayEnabled = true
+        startOverlayServer()
+        AgentSkillInstaller.install()
+    }
+
+    func disableAgentOverlay() {
+        agentOverlayEnabled = false
+        overlayServer.stop()
+        overlayServerPort = 0
+        clearAgentWidgets()
+        AgentSkillInstaller.uninstall()
+    }
+
+    func startOverlayServer() {
+        guard !overlayServer.isRunning else { return }
+        overlayServer.onSetWidgets = { [weak self] widgets in
+            self?.setAgentWidgets(widgets)
+        }
+        overlayServer.onUpsertWidget = { [weak self] widget in
+            self?.upsertAgentWidget(widget)
+        }
+        overlayServer.onRemoveWidget = { [weak self] id in
+            self?.removeAgentWidget(id: id)
+        }
+        overlayServer.onClearWidgets = { [weak self] in
+            self?.clearAgentWidgets()
+        }
+        overlayServer.getWidgetCount = { [weak self] in
+            self?.agentWidgets.count ?? 0
+        }
+        overlayServer.getOverlayVisible = { [weak self] in
+            self?.shouldShowOverlay ?? false
+        }
+        overlayServer.onReady = { [weak self] port in
+            self?.overlayServerPort = port
+        }
+        overlayServer.start()
+    }
+
+    // MARK: - Agent Widget CRUD
+
+    func setAgentWidgets(_ widgets: [AgentWidget]) {
+        agentWidgets = widgets
+        updateOverlayVisibility()
+    }
+
+    func upsertAgentWidget(_ widget: AgentWidget) {
+        if let index = agentWidgets.firstIndex(where: { $0.id == widget.id }) {
+            agentWidgets[index] = widget
+        } else {
+            agentWidgets.append(widget)
+        }
+        updateOverlayVisibility()
+    }
+
+    func removeAgentWidget(id: String) {
+        agentWidgets.removeAll { $0.id == id }
+        updateOverlayVisibility()
+    }
+
+    func clearAgentWidgets() {
+        agentWidgets.removeAll()
+        updateOverlayVisibility()
+    }
+
+    // MARK: - Overlay Lifecycle
+
+    func updateOverlayVisibility() {
+        if shouldShowOverlay {
+            overlayController.show(appState: self)
+        } else {
+            overlayController.dismiss()
+        }
     }
 
     func loadModel() async {
@@ -201,7 +288,7 @@ final class AppState: ObservableObject {
             liveTranscription = ""
             pendingChunks = []
             isProcessingChunk = false
-            overlayController.show(appState: self)
+            updateOverlayVisibility()
             recordingTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
                 Task { @MainActor in
                     guard let self, let start = self.recordingStartTime else { return }
@@ -262,7 +349,7 @@ final class AppState: ObservableObject {
         if duration < 0.3 || samples.isEmpty {
             logger.info("Recording too short, discarding")
             recordingState = .idle
-            overlayController.dismiss()
+            updateOverlayVisibility()
             return
         }
 
@@ -304,7 +391,7 @@ final class AppState: ObservableObject {
             guard !finalText.isEmpty else {
                 logger.info("Empty transcription result")
                 recordingState = .idle
-                overlayController.dismiss()
+                updateOverlayVisibility()
                 return
             }
 
@@ -317,7 +404,7 @@ final class AppState: ObservableObject {
             logger.info("Transcription: \(finalText)")
 
             recordingState = .idle
-            overlayController.dismiss()
+            updateOverlayVisibility()
 
             let bundleID = targetBundleID
             await textInjector.injectText(finalText, targetBundleID: bundleID, pressEnter: autoEnter)

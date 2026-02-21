@@ -17,6 +17,7 @@ struct SettingsView: View {
                 modelSection
                 audioSection
                 optionsSection
+                agentIntegrationSection
                 permissionsSection
             }
             .padding(20)
@@ -153,6 +154,53 @@ struct SettingsView: View {
                         appState.errorMessage = "Failed to update login item: \(error.localizedDescription)"
                     }
                 }
+        }
+    }
+
+    // MARK: - Agent Integration
+
+    private var agentIntegrationSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Agent Integration", systemImage: "terminal")
+                .font(.headline)
+
+            Toggle("Enable Agent Overlay", isOn: Binding(
+                get: { appState.agentOverlayEnabled },
+                set: { newValue in
+                    if newValue {
+                        appState.enableAgentOverlay()
+                    } else {
+                        appState.disableAgentOverlay()
+                    }
+                }
+            ))
+
+            Text("Allows AI agents like Claude Code to push widgets to the floating overlay")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            if appState.agentOverlayEnabled {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "network")
+                            .foregroundStyle(.secondary)
+                            .frame(width: 16)
+                        Text("Listening on port \(appState.overlayServerPort)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    HStack(spacing: 4) {
+                        Image(systemName: AgentSkillInstaller.isInstalled ? "checkmark.circle.fill" : "xmark.circle.fill")
+                            .foregroundStyle(AgentSkillInstaller.isInstalled ? .green : .red)
+                            .frame(width: 16)
+                        Text("Claude Code skill installed at ~/.claude/skills/overlay/")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.leading, 4)
+            }
         }
     }
 
