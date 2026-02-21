@@ -121,6 +121,7 @@ final class AppState: ObservableObject {
         }
 
         hasCompletedOnboarding = true
+        startGitPolling()
     }
 
     func openSettings() {
@@ -140,7 +141,6 @@ final class AppState: ObservableObject {
         agentOverlayEnabled = false
         overlayServer.stop()
         overlayServerPort = 0
-        stopGitPolling()
         clearAgentWidgets()
         AgentSkillInstaller.uninstall()
     }
@@ -174,33 +174,26 @@ final class AppState: ObservableObject {
     // MARK: - Agent Widget CRUD
 
     func setAgentWidgets(_ widgets: [AgentWidget]) {
-        let wasEmpty = agentWidgets.isEmpty
         agentWidgets = widgets
-        if wasEmpty && !agentWidgets.isEmpty { startGitPolling() }
-        else if !wasEmpty && agentWidgets.isEmpty { stopGitPolling() }
         updateOverlayVisibility()
     }
 
     func upsertAgentWidget(_ widget: AgentWidget) {
-        let wasEmpty = agentWidgets.isEmpty
         if let index = agentWidgets.firstIndex(where: { $0.id == widget.id }) {
             agentWidgets[index] = widget
         } else {
             agentWidgets.append(widget)
         }
-        if wasEmpty && !agentWidgets.isEmpty { startGitPolling() }
         updateOverlayVisibility()
     }
 
     func removeAgentWidget(id: String) {
         agentWidgets.removeAll { $0.id == id }
-        if agentWidgets.isEmpty { stopGitPolling() }
         updateOverlayVisibility()
     }
 
     func clearAgentWidgets() {
         agentWidgets.removeAll()
-        stopGitPolling()
         updateOverlayVisibility()
     }
 
@@ -208,7 +201,7 @@ final class AppState: ObservableObject {
 
     private func startGitPolling() {
         guard gitPollingTimer == nil else { return }
-        logger.info("Starting background git polling")
+        logger.notice("Starting background git polling")
 
         // Poll immediately, then every 10 seconds
         pollGitContext()
@@ -235,7 +228,7 @@ final class AppState: ObservableObject {
 
     private func stopGitPolling() {
         guard gitPollingTimer != nil || workspaceActivationObserver != nil else { return }
-        logger.info("Stopping background git polling")
+        logger.notice("Stopping background git polling")
         gitPollingTimer?.invalidate()
         gitPollingTimer = nil
         lastPolledTerminalPID = nil
@@ -252,10 +245,13 @@ final class AppState: ObservableObject {
            GitContextService.isTerminal(bundleID: bundleID) {
             pid = frontApp.processIdentifier
             lastPolledTerminalPID = pid
+            logger.notice("Git poll: terminal frontmost (pid=\(pid))")
         } else if let lastPID = lastPolledTerminalPID {
             // Terminal not frontmost — reuse last known terminal PID to keep CI/PR fresh
             pid = lastPID
+            logger.notice("Git poll: reusing last terminal (pid=\(pid))")
         } else {
+            logger.notice("Git poll: skipped, no terminal PID")
             return
         }
 
