@@ -335,21 +335,38 @@ final class GitContextService {
     }
 
     private static func queryCIStatus(branch: String, cwd: String) -> CIStatus? {
-        guard let gh = findGH(),
-              let output = run(gh, args: ["run", "list", "--branch", branch, "--limit", "5",
-                                          "--json", "status,conclusion,name,headSha"], cwd: cwd, timeout: 5) else { return nil }
+        guard let gh = findGH() else {
+            logger.notice("CI: gh not found")
+            return nil
+        }
+        guard let output = run(gh, args: ["run", "list", "--branch", branch, "--limit", "5",
+                                          "--json", "status,conclusion,name,headSha"], cwd: cwd, timeout: 5) else {
+            logger.notice("CI: gh run list returned nil")
+            return nil
+        }
 
         guard let data = output.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
-              !json.isEmpty else { return nil }
+              !json.isEmpty else {
+            logger.notice("CI: empty or unparseable JSON")
+            return nil
+        }
 
         let headSHA = git(["rev-parse", "HEAD"], cwd: cwd)
+        logger.notice("CI: HEAD=\(headSHA ?? "nil", privacy: .public), runs=\(json.count)")
+        for (i, run) in json.prefix(3).enumerated() {
+            let s = run["status"] as? String ?? "?"
+            let c = run["conclusion"] as? String ?? "?"
+            let sha = (run["headSha"] as? String)?.prefix(7) ?? "?"
+            logger.notice("CI: run[\(i)] status=\(s, privacy: .public) conclusion=\(c, privacy: .public) sha=\(sha, privacy: .public)")
+        }
 
         // Prefer any in-progress/queued run (newest first, which gh already returns)
         if let active = json.first(where: {
             let s = $0["status"] as? String ?? ""
             return ["in_progress", "queued", "waiting", "requested", "pending"].contains(s)
         }), let name = active["name"] as? String {
+            logger.notice("CI: found active run → pending")
             return CIStatus(state: .pending, name: name)
         }
 
@@ -358,6 +375,7 @@ final class GitContextService {
 
         // If the latest run's commit doesn't match HEAD, a new run is expected
         if let headSHA, let runSHA = first["headSha"] as? String, runSHA != headSHA {
+            logger.notice("CI: SHA mismatch (run=\(runSHA.prefix(7), privacy: .public) vs HEAD=\(headSHA.prefix(7), privacy: .public)) → pending")
             return CIStatus(state: .pending, name: name)
         }
 
@@ -370,6 +388,7 @@ final class GitContextService {
         default: state = .unknown
         }
 
+        logger.notice("CI: resolved → \(String(describing: conclusion), privacy: .public)")
         return CIStatus(state: state, name: name)
     }
 
