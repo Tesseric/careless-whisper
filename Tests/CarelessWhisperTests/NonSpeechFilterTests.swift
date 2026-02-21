@@ -91,4 +91,32 @@ final class NonSpeechFilterTests: XCTestCase {
         XCTAssertTrue(AppState.isNonSpeechHallucination("   "))
         XCTAssertTrue(AppState.isNonSpeechHallucination("\n"))
     }
+
+    // MARK: - Edge cases
+
+    func testMixedCaseWithPunctuationIsFiltered() {
+        XCTAssertTrue(AppState.isNonSpeechHallucination("WIND!!!"))
+        XCTAssertTrue(AppState.isNonSpeechHallucination("ThAnK yOu..."))
+    }
+
+    func testMarkerWithExtraWhitespaceIsFiltered() {
+        XCTAssertTrue(AppState.isNonSpeechHallucination("  wind  "))
+        XCTAssertTrue(AppState.isNonSpeechHallucination("\t\nwind\n\t"))
+    }
+
+    func testSpacesInsideBracketsIsFiltered() {
+        XCTAssertTrue(AppState.isNonSpeechHallucination("[ wind ]"))
+        XCTAssertTrue(AppState.isNonSpeechHallucination(" [wind] "))
+    }
+
+    func testDoubleAsteriskIsFiltered() {
+        XCTAssertTrue(AppState.isNonSpeechHallucination("**"))
+    }
+
+    func testLongerSpeechWithMarkerWordsPassesThrough() {
+        XCTAssertFalse(AppState.isNonSpeechHallucination("Thank you very much for the code review"))
+        XCTAssertFalse(AppState.isNonSpeechHallucination("The bell rang at noon"))
+        XCTAssertFalse(AppState.isNonSpeechHallucination("I can hear the water running"))
+        XCTAssertFalse(AppState.isNonSpeechHallucination("The crowd was huge"))
+    }
 }

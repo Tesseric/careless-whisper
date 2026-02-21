@@ -328,9 +328,10 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// Whisper hallucinates non-speech content — bracketed sound descriptions like
-    /// "[wind]", "(eerie music)", bare ambient words like "wind", and repetitive
-    /// filler phrases. Filter all of these so we only inject actual spoken words.
+    /// Whisper hallucinates non-speech content in various forms: bracketed/parenthesized/
+    /// asterisk-wrapped sound descriptions (e.g., "[wind]", "(music)", "*sighs*"), music
+    /// note symbols, bare ambient sound words, and repetitive filler phrases. Filter all
+    /// of these so we only inject actual spoken words.
     nonisolated static func isNonSpeechHallucination(_ text: String) -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return true }
@@ -338,7 +339,7 @@ final class AppState: ObservableObject {
         // Structural: entire text wrapped in brackets, parens, or asterisks
         if (trimmed.hasPrefix("[") && trimmed.hasSuffix("]")) ||
             (trimmed.hasPrefix("(") && trimmed.hasSuffix(")")) ||
-            (trimmed.hasPrefix("*") && trimmed.hasSuffix("*") && trimmed.count > 2) {
+            (trimmed.hasPrefix("*") && trimmed.hasSuffix("*") && trimmed.count > 1) {
             return true
         }
 
@@ -357,53 +358,53 @@ final class AppState: ObservableObject {
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: .punctuationCharacters)
 
-        let markers: Set<String> = [
-            // Silence / blank
-            "silence", "blank audio", "blank_audio", "no speech", "no audio",
-            "inaudible",
-            // Environmental sounds
-            "noise", "background noise", "static", "white noise",
-            "wind", "wind blowing", "wind howling", "wind noise",
-            "thunder", "rain", "rain falling", "rain sounds",
-            "water", "water running", "water dripping", "water flowing",
-            "birds", "birds chirping", "birds singing", "bird sounds",
-            "dog barking", "dogs barking",
-            "crickets", "insects",
-            // Human non-speech sounds
-            "breathing", "heavy breathing", "deep breathing",
-            "footsteps", "typing", "clicking", "tapping",
-            "coughing", "cough", "snoring", "snore",
-            "sigh", "sighs", "sighing",
-            "laugh", "laughs", "laughing", "laughter",
-            "gasp", "gasps", "gasping",
-            "groan", "groans", "groaning",
-            "yawn", "yawns", "yawning",
-            "sneeze", "sneezes", "sneezing",
-            "clears throat", "throat clearing",
-            "applause", "clapping",
-            // Music descriptions
-            "music", "music playing", "background music",
-            "eerie music", "soft music", "dramatic music", "upbeat music",
-            "piano music", "sad music", "intense music", "suspenseful music",
-            "ominous music", "cheerful music", "gentle music", "classical music",
-            "haunting music", "somber music", "tense music", "light music",
-            // Mechanical / urban sounds
-            "phone ringing", "bell ringing", "bell",
-            "door closing", "door opening", "door slam",
-            "engine", "engine running", "car horn", "siren",
-            "beep", "beeping", "buzzing", "buzz", "humming", "hum",
-            "whistling", "whistle",
-            // Crowd / chatter
-            "crowd noise", "crowd cheering", "crowd",
-            "chatter", "indistinct chatter", "indistinct talking",
-            "chanting",
-            // Common Whisper silence hallucinations (repetitive filler)
-            "thank you", "thanks for watching", "thanks for listening",
-            "subscribe", "like and subscribe",
-        ]
-
-        return markers.contains(stripped)
+        return nonSpeechMarkers.contains(stripped)
     }
+
+    private nonisolated static let nonSpeechMarkers: Set<String> = [
+        // Silence / blank
+        "silence", "blank audio", "blank_audio", "no speech", "no audio",
+        "inaudible",
+        // Environmental sounds
+        "noise", "background noise", "static", "white noise",
+        "wind", "wind blowing", "wind howling", "wind noise",
+        "thunder", "rain", "rain falling", "rain sounds",
+        "water", "water running", "water dripping", "water flowing",
+        "birds", "birds chirping", "birds singing", "bird sounds",
+        "dog barking", "dogs barking",
+        "crickets", "insects",
+        // Human non-speech sounds
+        "breathing", "heavy breathing", "deep breathing",
+        "footsteps", "typing", "clicking", "tapping",
+        "coughing", "cough", "snoring", "snore",
+        "sigh", "sighs", "sighing",
+        "laugh", "laughs", "laughing", "laughter",
+        "gasp", "gasps", "gasping",
+        "groan", "groans", "groaning",
+        "yawn", "yawns", "yawning",
+        "sneeze", "sneezes", "sneezing",
+        "clears throat", "throat clearing",
+        "applause", "clapping",
+        // Music descriptions
+        "music", "music playing", "background music",
+        "eerie music", "soft music", "dramatic music", "upbeat music",
+        "piano music", "sad music", "intense music", "suspenseful music",
+        "ominous music", "cheerful music", "gentle music", "classical music",
+        "haunting music", "somber music", "tense music", "light music",
+        // Mechanical / urban sounds
+        "phone ringing", "bell ringing", "bell",
+        "door closing", "door opening", "door slam",
+        "engine", "engine running", "car horn", "siren",
+        "beep", "beeping", "buzzing", "buzz", "humming", "hum",
+        "whistling", "whistle",
+        // Crowd / chatter
+        "crowd noise", "crowd cheering", "crowd",
+        "chatter", "indistinct chatter", "indistinct talking",
+        "chanting",
+        // Common Whisper silence hallucinations (repetitive filler)
+        "thank you", "thanks for watching", "thanks for listening",
+        "subscribe", "like and subscribe",
+    ]
 }
 
 extension NSSound {

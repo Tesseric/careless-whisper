@@ -28,41 +28,10 @@ final class WhisperService: Sendable {
         }.value
 
         let text = segments.map(\.text)
-            .filter { !Self.isNonSpeechSegment($0) }
+            .filter { !AppState.isNonSpeechHallucination($0) }
             .joined(separator: " ")
         logger.info("Transcription complete: \(text.prefix(100))")
         return text
-    }
-
-    /// Returns true if a segment's text is a non-speech hallucination
-    /// (sound description, music annotation, etc.) rather than spoken words.
-    private static func isNonSpeechSegment(_ text: String) -> Bool {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return true }
-
-        // Text entirely wrapped in brackets or parentheses is a sound
-        // description, never actual speech (e.g. "[wind]", "(eerie music)")
-        if (trimmed.hasPrefix("[") && trimmed.hasSuffix("]")) ||
-            (trimmed.hasPrefix("(") && trimmed.hasSuffix(")")) {
-            return true
-        }
-
-        // Asterisk-wrapped annotations: *sighs*, *wind blowing*
-        if trimmed.hasPrefix("*") && trimmed.hasSuffix("*") && trimmed.count > 2 {
-            return true
-        }
-
-        // Music note symbols indicate non-speech audio
-        if trimmed.contains("♪") || trimmed.contains("🎵") || trimmed.contains("🎶") {
-            return true
-        }
-
-        // [BLANK_AUDIO] anywhere in the segment
-        if trimmed.contains("[BLANK_AUDIO]") {
-            return true
-        }
-
-        return false
     }
 
     func unloadModel() {
