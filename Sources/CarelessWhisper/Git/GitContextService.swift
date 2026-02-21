@@ -335,32 +335,60 @@ final class GitContextService {
     }
 
     private static func queryCIStatus(branch: String, cwd: String) -> CIStatus? {
-        guard let gh = findGH(),
-              let output = run(gh, args: ["run", "list", "--branch", branch, "--limit", "1",
-                                          "--json", "status,conclusion,name"], cwd: cwd, timeout: 5) else { return nil }
+        guard let gh = findGH() else {
+            logger.notice("CI: gh not found")
+            return nil
+        }
+        guard let output = run(gh, args: ["run", "list", "--branch", branch, "--limit", "5",
+                                          "--json", "status,conclusion,name,headSha"], cwd: cwd, timeout: 5) else {
+            logger.notice("CI: gh run list returned nil")
+            return nil
+        }
 
         guard let data = output.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
-              let first = json.first,
-              let name = first["name"] as? String else { return nil }
-
-        let status = first["status"] as? String ?? ""
-        let conclusion = first["conclusion"] as? String
-
-        let state: CIState
-        if status == "completed" {
-            switch conclusion {
-            case "success": state = .success
-            case "failure": state = .failure
-            case "cancelled": state = .cancelled
-            default: state = .unknown
-            }
-        } else if ["in_progress", "queued", "waiting", "requested", "pending"].contains(status) {
-            state = .pending
-        } else {
-            state = .unknown
+              !json.isEmpty else {
+            logger.notice("CI: empty or unparseable JSON")
+            return nil
         }
 
+        let headSHA = git(["rev-parse", "HEAD"], cwd: cwd)
+        logger.notice("CI: HEAD=\(headSHA ?? "nil", privacy: .public), runs=\(json.count)")
+        for (i, run) in json.prefix(3).enumerated() {
+            let s = run["status"] as? String ?? "?"
+            let c = run["conclusion"] as? String ?? "?"
+            let sha = (run["headSha"] as? String)?.prefix(7) ?? "?"
+            logger.notice("CI: run[\(i)] status=\(s, privacy: .public) conclusion=\(c, privacy: .public) sha=\(sha, privacy: .public)")
+        }
+
+        // Prefer any in-progress/queued run (newest first, which gh already returns)
+        if let active = json.first(where: {
+            let s = $0["status"] as? String ?? ""
+            return ["in_progress", "queued", "waiting", "requested", "pending"].contains(s)
+        }), let name = active["name"] as? String {
+            logger.notice("CI: found active run → pending")
+            return CIStatus(state: .pending, name: name)
+        }
+
+        // Use the latest completed run
+        guard let first = json.first, let name = first["name"] as? String else { return nil }
+
+        // If the latest run's commit doesn't match HEAD, a new run is expected
+        if let headSHA, let runSHA = first["headSha"] as? String, runSHA != headSHA {
+            logger.notice("CI: SHA mismatch (run=\(runSHA.prefix(7), privacy: .public) vs HEAD=\(headSHA.prefix(7), privacy: .public)) → pending")
+            return CIStatus(state: .pending, name: name)
+        }
+
+        let conclusion = first["conclusion"] as? String
+        let state: CIState
+        switch conclusion {
+        case "success": state = .success
+        case "failure": state = .failure
+        case "cancelled": state = .cancelled
+        default: state = .unknown
+        }
+
+        logger.notice("CI: resolved → \(String(describing: conclusion), privacy: .public)")
         return CIStatus(state: state, name: name)
     }
 
@@ -382,10 +410,25 @@ final class GitContextService {
         run("/usr/bin/git", args: args, cwd: cwd)
     }
 
+    private static let processEnvironment: [String: String] = {
+        var env = ProcessInfo.processInfo.environment
+        // macOS apps don't inherit the user's shell PATH, so gh/git may not be found.
+        // Ensure standard binary paths are included.
+        let requiredPaths = ["/usr/bin", "/usr/local/bin", "/opt/homebrew/bin", "/bin", "/usr/sbin"]
+        let currentPath = env["PATH"] ?? ""
+        let existingPaths = Set(currentPath.split(separator: ":").map(String.init))
+        let missing = requiredPaths.filter { !existingPaths.contains($0) }
+        if !missing.isEmpty {
+            env["PATH"] = (missing + [currentPath]).joined(separator: ":")
+        }
+        return env
+    }()
+
     private static func run(_ executable: String, args: [String], cwd: String? = nil, checkExit: Bool = true, timeout: TimeInterval = 0) -> String? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = args
+        process.environment = processEnvironment
         if let cwd { process.currentDirectoryURL = URL(fileURLWithPath: cwd) }
         let pipe = Pipe()
         process.standardOutput = pipe

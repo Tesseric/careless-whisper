@@ -26,6 +26,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         Task { @MainActor in
             await appState.setup()
+            if appState.agentOverlayEnabled {
+                appState.startOverlayServer()
+                AgentSkillInstaller.install()
+            }
+        }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        if appState.overlayServer.isRunning {
+            appState.overlayServer.stop()
         }
     }
 
