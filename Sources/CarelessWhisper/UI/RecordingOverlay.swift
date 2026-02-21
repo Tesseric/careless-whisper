@@ -229,6 +229,7 @@ struct OverlayContentView: View {
                         recordingState: appState.recordingState,
                         duration: appState.recordingDuration
                     )
+                    .padding(.trailing, appState.agentWidgets.isEmpty ? 0 : 20)
                 }
 
                 if !appState.agentWidgets.isEmpty {
