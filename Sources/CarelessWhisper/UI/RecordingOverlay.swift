@@ -563,6 +563,10 @@ private struct PRBadgeView: View {
             Text("#\(pr.number)")
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(.white.opacity(0.7))
+            Text(pr.title)
+                .font(.system(size: 10))
+                .foregroundStyle(.white.opacity(0.5))
+                .lineLimit(1)
             if let label = reviewLabel {
                 Text(label)
                     .font(.system(size: 9))

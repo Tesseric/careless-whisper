@@ -382,10 +382,25 @@ final class GitContextService {
         run("/usr/bin/git", args: args, cwd: cwd)
     }
 
+    private static let processEnvironment: [String: String] = {
+        var env = ProcessInfo.processInfo.environment
+        // macOS apps don't inherit the user's shell PATH, so gh/git may not be found.
+        // Ensure standard binary paths are included.
+        let requiredPaths = ["/usr/bin", "/usr/local/bin", "/opt/homebrew/bin", "/bin", "/usr/sbin"]
+        let currentPath = env["PATH"] ?? ""
+        let existingPaths = Set(currentPath.split(separator: ":").map(String.init))
+        let missing = requiredPaths.filter { !existingPaths.contains($0) }
+        if !missing.isEmpty {
+            env["PATH"] = (missing + [currentPath]).joined(separator: ":")
+        }
+        return env
+    }()
+
     private static func run(_ executable: String, args: [String], cwd: String? = nil, checkExit: Bool = true, timeout: TimeInterval = 0) -> String? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = args
+        process.environment = processEnvironment
         if let cwd { process.currentDirectoryURL = URL(fileURLWithPath: cwd) }
         let pipe = Pipe()
         process.standardOutput = pipe
