@@ -246,12 +246,19 @@ final class AppState: ObservableObject {
     }
 
     private func pollGitContext() {
-        guard let frontApp = NSWorkspace.shared.frontmostApplication,
-              let bundleID = frontApp.bundleIdentifier,
-              GitContextService.isTerminal(bundleID: bundleID) else { return }
+        let pid: pid_t
+        if let frontApp = NSWorkspace.shared.frontmostApplication,
+           let bundleID = frontApp.bundleIdentifier,
+           GitContextService.isTerminal(bundleID: bundleID) {
+            pid = frontApp.processIdentifier
+            lastPolledTerminalPID = pid
+        } else if let lastPID = lastPolledTerminalPID {
+            // Terminal not frontmost — reuse last known terminal PID to keep CI/PR fresh
+            pid = lastPID
+        } else {
+            return
+        }
 
-        let pid = frontApp.processIdentifier
-        lastPolledTerminalPID = pid
         Task {
             let context = await GitContextService.detect(terminalPID: pid)
             self.gitContext = context
