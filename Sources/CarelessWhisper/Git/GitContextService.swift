@@ -336,29 +336,38 @@ final class GitContextService {
 
     private static func queryCIStatus(branch: String, cwd: String) -> CIStatus? {
         guard let gh = findGH(),
-              let output = run(gh, args: ["run", "list", "--branch", branch, "--limit", "1",
-                                          "--json", "status,conclusion,name"], cwd: cwd, timeout: 5) else { return nil }
+              let output = run(gh, args: ["run", "list", "--branch", branch, "--limit", "5",
+                                          "--json", "status,conclusion,name,headSha"], cwd: cwd, timeout: 5) else { return nil }
 
         guard let data = output.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
-              let first = json.first,
-              let name = first["name"] as? String else { return nil }
+              !json.isEmpty else { return nil }
 
-        let status = first["status"] as? String ?? ""
+        let headSHA = git(["rev-parse", "HEAD"], cwd: cwd)
+
+        // Prefer any in-progress/queued run (newest first, which gh already returns)
+        if let active = json.first(where: {
+            let s = $0["status"] as? String ?? ""
+            return ["in_progress", "queued", "waiting", "requested", "pending"].contains(s)
+        }), let name = active["name"] as? String {
+            return CIStatus(state: .pending, name: name)
+        }
+
+        // Use the latest completed run
+        guard let first = json.first, let name = first["name"] as? String else { return nil }
+
+        // If the latest run's commit doesn't match HEAD, a new run is expected
+        if let headSHA, let runSHA = first["headSha"] as? String, runSHA != headSHA {
+            return CIStatus(state: .pending, name: name)
+        }
+
         let conclusion = first["conclusion"] as? String
-
         let state: CIState
-        if status == "completed" {
-            switch conclusion {
-            case "success": state = .success
-            case "failure": state = .failure
-            case "cancelled": state = .cancelled
-            default: state = .unknown
-            }
-        } else if ["in_progress", "queued", "waiting", "requested", "pending"].contains(status) {
-            state = .pending
-        } else {
-            state = .unknown
+        switch conclusion {
+        case "success": state = .success
+        case "failure": state = .failure
+        case "cancelled": state = .cancelled
+        default: state = .unknown
         }
 
         return CIStatus(state: state, name: name)
