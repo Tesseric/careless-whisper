@@ -254,10 +254,7 @@ final class AppState: ObservableObject {
         lastPolledTerminalPID = pid
         Task {
             let context = await GitContextService.detect(terminalPID: pid)
-            // Only update if not currently recording (during recording, keep stable context)
-            if self.recordingState == .idle {
-                self.gitContext = context
-            }
+            self.gitContext = context
         }
     }
 
@@ -334,7 +331,7 @@ final class AppState: ObservableObject {
         logger.info("Starting recording")
         targetBundleID = textInjector.captureFrontmostApp()
 
-        // Use pre-fetched git context from polling if available; otherwise fetch on-demand
+        // Fetch git context on-demand if not already populated by background polling
         if gitContext == nil {
             if GitContextService.isTerminal(bundleID: targetBundleID),
                let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier {
