@@ -27,7 +27,6 @@ final class OverlayController {
         panel.backgroundColor = .clear
         panel.hasShadow = true
         panel.contentView = hosting
-        panel.isMovableByWindowBackground = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
         // Position: top-center of main screen
@@ -79,6 +78,23 @@ final class OverlayController {
     }
 }
 
+// MARK: - Window Drag Handle
+
+/// An NSView that initiates a window drag on mouseDown. Used as a background layer
+/// so the overlay is draggable from any area not covered by interactive content.
+private struct WindowDragHandle: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        DragHandleView()
+    }
+    func updateNSView(_ nsView: NSView, context: Context) {}
+}
+
+private class DragHandleView: NSView {
+    override func mouseDown(with event: NSEvent) {
+        window?.performDrag(with: event)
+    }
+}
+
 // MARK: - Overlay Content View
 
 struct OverlayContentView: View {
@@ -86,38 +102,58 @@ struct OverlayContentView: View {
     @State private var webViewHeight: CGFloat = 60
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if appState.recordingState != .idle {
-                RecordingStatusBar(
-                    recordingState: appState.recordingState,
-                    duration: appState.recordingDuration
-                )
-            }
+        ZStack {
+            // Background drag handle — enables dragging from any non-interactive area
+            WindowDragHandle()
 
-            if appState.gitContext != nil && appState.agentWidgets.isEmpty {
-                GitContextView(context: appState.gitContext!)
-            }
+            VStack(alignment: .leading, spacing: 8) {
+                if appState.recordingState != .idle {
+                    RecordingStatusBar(
+                        recordingState: appState.recordingState,
+                        duration: appState.recordingDuration
+                    )
+                }
 
+                if appState.gitContext != nil && appState.agentWidgets.isEmpty {
+                    GitContextView(context: appState.gitContext!)
+                }
+
+                if !appState.agentWidgets.isEmpty {
+                    let composed = HTMLComposer.compose(widgets: appState.agentWidgets)
+                    WidgetWebView(html: composed, contentHeight: $webViewHeight)
+                        .frame(height: webViewHeight)
+                        .onChange(of: webViewHeight) { _, newHeight in
+                            appState.widgetContentHeight = newHeight
+                        }
+                }
+
+                if appState.recordingState == .recording, !appState.liveTranscription.isEmpty {
+                    Text(appState.liveTranscription)
+                        .font(.system(.caption))
+                        .foregroundStyle(.white.opacity(0.85))
+                        .lineLimit(4)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+        }
+        .frame(width: 420, alignment: .leading)
+        .overlay(alignment: .topTrailing) {
             if !appState.agentWidgets.isEmpty {
-                let composed = HTMLComposer.compose(widgets: appState.agentWidgets)
-                WidgetWebView(html: composed, contentHeight: $webViewHeight)
-                    .frame(height: webViewHeight)
-                    .onChange(of: webViewHeight) { _, newHeight in
-                        appState.widgetContentHeight = newHeight
-                    }
-            }
-
-            if appState.recordingState == .recording, !appState.liveTranscription.isEmpty {
-                Text(appState.liveTranscription)
-                    .font(.system(.caption))
-                    .foregroundStyle(.white.opacity(0.85))
-                    .lineLimit(4)
-                    .fixedSize(horizontal: false, vertical: true)
+                Button {
+                    appState.clearAgentWidgets()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.5))
+                        .frame(width: 18, height: 18)
+                        .background(.white.opacity(0.1), in: Circle())
+                }
+                .buttonStyle(.plain)
+                .padding(6)
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .frame(width: 420, alignment: .leading)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
     }
 }
