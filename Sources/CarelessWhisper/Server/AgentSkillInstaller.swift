@@ -66,16 +66,19 @@ enum AgentSkillInstaller {
 
     All commands go through `~/.claude/skills/overlay/overlay-cli`. Once the user allows `Bash(~/.claude/skills/overlay/overlay-cli:*)`, all subsequent calls work without re-prompting.
 
+    **IMPORTANT:** Always use the Write tool to create JSON files — NEVER use cat, echo, heredoc, or any Bash command to write files. The Write tool requires no user approval, keeping the workflow frictionless.
+
     **Show widgets** — replace all widgets and show the overlay.
-    First write JSON using the Write tool (no shell approval needed), then pass the file path:
+    Step 1: Use the Write tool to write `{"widgets":[...]}` to `/tmp/overlay-widgets.json`
+    Step 2: Run the CLI:
     ```bash
-    # Write {"widgets":[...]} to /tmp/overlay-widgets.json using the Write tool, then:
     ~/.claude/skills/overlay/overlay-cli show /tmp/overlay-widgets.json
     ```
 
     **Update one widget** — upsert a single widget by ID:
+    Step 1: Use the Write tool to write `{"widget":{...}}` to `/tmp/overlay-widget.json`
+    Step 2: Run the CLI:
     ```bash
-    # Write {"widget":{...}} to /tmp/overlay-widget.json using the Write tool, then:
     ~/.claude/skills/overlay/overlay-cli update /tmp/overlay-widget.json
     ```
 
