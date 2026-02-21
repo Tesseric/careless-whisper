@@ -1,20 +1,46 @@
 import SwiftUI
 import AppKit
 import Combine
+import os
+
+// MARK: - Size-Observing NSHostingView
+
+/// NSHostingView subclass that notifies when its SwiftUI content's intrinsic size changes.
+private class SizeObservingHostingView<Content: View>: NSHostingView<Content> {
+    var onIntrinsicSizeInvalidated: (() -> Void)?
+
+    override func invalidateIntrinsicContentSize() {
+        super.invalidateIntrinsicContentSize()
+        onIntrinsicSizeInvalidated?()
+    }
+}
 
 /// Floating HUD shown during recording or when agent widgets are present — non-activating so it doesn't steal focus.
 @MainActor
 final class OverlayController {
+    private let logger = Logger(subsystem: "com.carelesswhisper", category: "OverlayController")
     private var panel: NSPanel?
-    private var heightSubscription: AnyCancellable?
+    private var hostingView: SizeObservingHostingView<AnyView>?
+    private var dualColumnSubscription: AnyCancellable?
+
+    private static let gitColumnWidth: CGFloat = 260
+    private static let gapWidth: CGFloat = 12
+    private static let widgetColumnWidth: CGFloat = 420
+    static let dualWidth: CGFloat = gitColumnWidth + gapWidth + widgetColumnWidth  // 692
+    static let singleWidth: CGFloat = widgetColumnWidth  // 420
+
+    /// The intended panel width (not the mid-animation value).
+    private var targetPanelWidth: CGFloat = singleWidth
 
     func show(appState: AppState) {
         // Idempotent: if panel already exists, SwiftUI reactivity handles content changes
         guard panel == nil else { return }
 
-        let overlayView = OverlayContentView()
-            .environmentObject(appState)
-        let hosting = NSHostingView(rootView: overlayView)
+        let overlayView = AnyView(
+            OverlayContentView()
+                .environmentObject(appState)
+        )
+        let hosting = SizeObservingHostingView(rootView: overlayView)
 
         let panel = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: 420, height: 200),
@@ -26,54 +52,141 @@ final class OverlayController {
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = true
-        panel.contentView = hosting
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.contentView = hosting
 
         // Position: top-center of main screen
         if let screen = NSScreen.main {
             let screenFrame = screen.visibleFrame
             let x = screenFrame.midX - 210
-            let y = screenFrame.maxY - 80
+            let y = screenFrame.maxY - 20 - 200
             panel.setFrameOrigin(NSPoint(x: x, y: y))
+            logger.notice("Initial panel: x=\(x, format: .fixed(precision: 0)), y=\(y, format: .fixed(precision: 0)), screen=\(Int(screenFrame.width))x\(Int(screenFrame.height))")
         }
 
         panel.orderFrontRegardless()
         self.panel = panel
+        self.hostingView = hosting
 
-        // Resize panel when widget content height changes
-        heightSubscription = appState.$widgetContentHeight
-            .dropFirst()
-            .removeDuplicates()
-            .sink { [weak self] height in
-                self?.resizePanel(forWidgetHeight: height)
+        // Resize panel whenever SwiftUI content's intrinsic size changes
+        hosting.onIntrinsicSizeInvalidated = { [weak self] in
+            // Defer to next run loop so intrinsicContentSize is fully updated
+            DispatchQueue.main.async {
+                self?.resizePanelToFitContent()
             }
+        }
+
+        // Also do an initial resize after the first layout pass
+        DispatchQueue.main.async { [weak self] in
+            self?.resizePanelToFitContent()
+        }
+
+        logger.notice("Panel shown, intrinsicSize=\(Int(hosting.intrinsicContentSize.width))x\(Int(hosting.intrinsicContentSize.height))")
+
+        // Detect dual-column transitions
+        dualColumnSubscription = Publishers.CombineLatest3(
+            appState.$recordingState,
+            appState.$gitContext,
+            appState.$agentWidgets
+        )
+        .receive(on: RunLoop.main)
+        .sink { [weak self] recordingState, gitContext, agentWidgets in
+            self?.updateDualColumnState(
+                appState: appState,
+                recordingState: recordingState,
+                gitContext: gitContext,
+                agentWidgets: agentWidgets
+            )
+        }
     }
 
     func dismiss() {
-        heightSubscription?.cancel()
-        heightSubscription = nil
+        logger.notice("Dismissing overlay")
+        hostingView?.onIntrinsicSizeInvalidated = nil
+        hostingView = nil
+        dualColumnSubscription?.cancel()
+        dualColumnSubscription = nil
         panel?.close()
         panel = nil
     }
 
-    /// Resize the panel based on the JS-reported widget content height plus padding.
-    private func resizePanel(forWidgetHeight widgetHeight: CGFloat) {
-        guard let panel else { return }
+    private func updateDualColumnState(
+        appState: AppState,
+        recordingState: RecordingState,
+        gitContext: GitContext?,
+        agentWidgets: [AgentWidget]
+    ) {
+        let shouldDual = recordingState != .idle && gitContext != nil && !agentWidgets.isEmpty
 
-        // VStack vertical padding (10 top + 10 bottom) + some margin
-        let totalHeight = widgetHeight + 24
+        guard shouldDual != appState.overlayDualColumn else { return }
 
-        let maxHeight: CGFloat
-        if let screen = panel.screen ?? NSScreen.main {
-            maxHeight = screen.visibleFrame.height - 40
-        } else {
-            maxHeight = 800
+        logger.notice("Dual column: \(shouldDual), widgets=\(agentWidgets.count)")
+
+        if shouldDual {
+            if let panel, let screen = panel.screen ?? NSScreen.main {
+                let panelCenter = panel.frame.midX
+                let screenCenter = screen.visibleFrame.midX
+                appState.gitContextSide = panelCenter <= screenCenter ? .trailing : .leading
+            } else {
+                appState.gitContextSide = .trailing
+            }
         }
+
+        appState.overlayDualColumn = shouldDual
+        animatePanelWidth(dual: shouldDual, side: appState.gitContextSide)
+    }
+
+    private func animatePanelWidth(dual: Bool, side: Edge) {
+        guard let panel, let screen = panel.screen ?? NSScreen.main else { return }
+        let newWidth: CGFloat = dual ? Self.dualWidth : Self.singleWidth
+        let delta = newWidth - targetPanelWidth
+        targetPanelWidth = newWidth
+
+        logger.notice("Width change: \(Int(newWidth)), delta=\(Int(delta)), side=\(side == .leading ? "L" : "R")")
 
         var frame = panel.frame
         let oldTop = frame.maxY
-        frame.size.height = min(totalHeight, maxHeight)
+
+        if side == .leading && delta != 0 {
+            frame.origin.x -= delta
+            frame.origin.x = max(screen.visibleFrame.minX, frame.origin.x)
+        }
+
+        frame.size.width = newWidth
         frame.origin.y = oldTop - frame.size.height
+
+        frame.origin.x = max(screen.visibleFrame.minX, frame.origin.x)
+        frame.origin.x = min(frame.origin.x, screen.visibleFrame.maxX - frame.size.width)
+
+        panel.setFrame(frame, display: true, animate: false)
+    }
+
+    /// Resize the panel to fit the hosting view's intrinsic content size.
+    private func resizePanelToFitContent() {
+        guard let panel, let hostingView else { return }
+        let intrinsic = hostingView.intrinsicContentSize
+        guard intrinsic.height > 0, intrinsic.width > 0 else {
+            logger.notice("resizePanelToFitContent skipped: intrinsic=\(Int(intrinsic.width))x\(Int(intrinsic.height))")
+            return
+        }
+
+        let screen = panel.screen ?? NSScreen.main
+        let maxHeight: CGFloat = (screen?.visibleFrame.height ?? 840) - 40
+
+        var frame = panel.frame
+        let oldTop = frame.maxY
+        let newHeight = min(intrinsic.height, maxHeight)
+        frame.size.height = newHeight
+        frame.size.width = targetPanelWidth
+        frame.origin.y = oldTop - newHeight
+
+        if let sf = screen?.visibleFrame {
+            frame.origin.x = max(sf.minX, frame.origin.x)
+            frame.origin.x = min(frame.origin.x, sf.maxX - frame.size.width)
+            frame.origin.y = max(sf.minY, frame.origin.y)
+        }
+
+        logger.notice("Resize: intrinsic=\(Int(intrinsic.width))x\(Int(intrinsic.height)), panel=\(Int(frame.width))x\(Int(frame.height)) at y=\(Int(frame.origin.y))")
         panel.setFrame(frame, display: true, animate: false)
     }
 }
@@ -101,6 +214,10 @@ struct OverlayContentView: View {
     @EnvironmentObject var appState: AppState
     @State private var webViewHeight: CGFloat = 60
 
+    private var overlayWidth: CGFloat {
+        appState.overlayDualColumn ? OverlayController.dualWidth : OverlayController.singleWidth
+    }
+
     var body: some View {
         ZStack {
             // Background drag handle — enables dragging from any non-interactive area
@@ -114,17 +231,25 @@ struct OverlayContentView: View {
                     )
                 }
 
-                if appState.gitContext != nil && appState.agentWidgets.isEmpty {
-                    GitContextView(context: appState.gitContext!)
-                }
-
                 if !appState.agentWidgets.isEmpty {
-                    let composed = HTMLComposer.compose(widgets: appState.agentWidgets)
-                    WidgetWebView(html: composed, contentHeight: $webViewHeight)
-                        .frame(height: webViewHeight)
-                        .onChange(of: webViewHeight) { _, newHeight in
-                            appState.widgetContentHeight = newHeight
+                    // Widgets present: use HStack so git column can slide in/out
+                    HStack(alignment: .top, spacing: 12) {
+                        if appState.overlayDualColumn && appState.gitContextSide == .leading {
+                            gitColumnView
+                                .transition(.move(edge: .leading).combined(with: .opacity))
                         }
+
+                        widgetView
+
+                        if appState.overlayDualColumn && appState.gitContextSide == .trailing {
+                            gitColumnView
+                                .transition(.move(edge: .trailing).combined(with: .opacity))
+                        }
+                    }
+                    .clipped()
+                } else if appState.gitContext != nil {
+                    // No widgets, recording only: standalone git context
+                    GitContextView(context: appState.gitContext!)
                 }
 
                 if appState.recordingState == .recording, !appState.liveTranscription.isEmpty {
@@ -138,7 +263,7 @@ struct OverlayContentView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
         }
-        .frame(width: 420, alignment: .leading)
+        .frame(width: overlayWidth, alignment: .leading)
         .overlay(alignment: .topTrailing) {
             if !appState.agentWidgets.isEmpty {
                 Button {
@@ -155,6 +280,23 @@ struct OverlayContentView: View {
             }
         }
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var gitColumnView: some View {
+        ScrollView(.vertical, showsIndicators: false) {
+            GitContextView(context: appState.gitContext!)
+        }
+        .frame(width: 260)
+    }
+
+    @ViewBuilder
+    private var widgetView: some View {
+        let composed = HTMLComposer.compose(widgets: appState.agentWidgets)
+        WidgetWebView(html: composed, contentHeight: $webViewHeight)
+            .frame(height: webViewHeight)
+            .onChange(of: webViewHeight) { _, newHeight in
+                appState.widgetContentHeight = newHeight
+            }
     }
 }
 
@@ -204,7 +346,7 @@ private struct GitContextView: View {
     let context: GitContext
 
     var body: some View {
-        Group {
+        VStack(alignment: .leading, spacing: 8) {
             // Repo / branch + ahead/behind
             HStack(spacing: 6) {
                 Image(systemName: "arrow.triangle.branch")

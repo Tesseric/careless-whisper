@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import Combine
 import os
 
 enum RecordingState: Equatable {
@@ -27,6 +28,8 @@ final class AppState: ObservableObject {
     @Published var agentWidgets: [AgentWidget] = []
     @Published var overlayServerPort: UInt16 = 0
     @Published var widgetContentHeight: CGFloat = 0
+    @Published var gitContextSide: Edge = .trailing
+    @Published var overlayDualColumn: Bool = false
 
     let audioCaptureService = AudioCaptureService()
     let whisperService = WhisperService()
@@ -43,6 +46,9 @@ final class AppState: ObservableObject {
     private var targetBundleID: String?
     private var pendingChunks: [[Float]] = []
     private var isProcessingChunk = false
+    private var gitPollingTimer: Timer?
+    private var lastPolledTerminalPID: pid_t?
+    private var workspaceActivationObserver: Any?
 
     @AppStorage("selectedModel") var selectedModelRaw: String = WhisperModel.baseEn.rawValue
     @AppStorage("completionSound") var completionSoundEnabled: Bool = true
@@ -134,6 +140,7 @@ final class AppState: ObservableObject {
         agentOverlayEnabled = false
         overlayServer.stop()
         overlayServerPort = 0
+        stopGitPolling()
         clearAgentWidgets()
         AgentSkillInstaller.uninstall()
     }
@@ -167,27 +174,91 @@ final class AppState: ObservableObject {
     // MARK: - Agent Widget CRUD
 
     func setAgentWidgets(_ widgets: [AgentWidget]) {
+        let wasEmpty = agentWidgets.isEmpty
         agentWidgets = widgets
+        if wasEmpty && !agentWidgets.isEmpty { startGitPolling() }
+        else if !wasEmpty && agentWidgets.isEmpty { stopGitPolling() }
         updateOverlayVisibility()
     }
 
     func upsertAgentWidget(_ widget: AgentWidget) {
+        let wasEmpty = agentWidgets.isEmpty
         if let index = agentWidgets.firstIndex(where: { $0.id == widget.id }) {
             agentWidgets[index] = widget
         } else {
             agentWidgets.append(widget)
         }
+        if wasEmpty && !agentWidgets.isEmpty { startGitPolling() }
         updateOverlayVisibility()
     }
 
     func removeAgentWidget(id: String) {
         agentWidgets.removeAll { $0.id == id }
+        if agentWidgets.isEmpty { stopGitPolling() }
         updateOverlayVisibility()
     }
 
     func clearAgentWidgets() {
         agentWidgets.removeAll()
+        stopGitPolling()
         updateOverlayVisibility()
+    }
+
+    // MARK: - Git Polling
+
+    private func startGitPolling() {
+        guard gitPollingTimer == nil else { return }
+        logger.info("Starting background git polling")
+
+        // Poll immediately, then every 10 seconds
+        pollGitContext()
+        gitPollingTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.pollGitContext()
+            }
+        }
+
+        // Also poll immediately when user switches to a terminal
+        workspaceActivationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+                  let bundleID = app.bundleIdentifier,
+                  GitContextService.isTerminal(bundleID: bundleID) else { return }
+            Task { @MainActor in
+                self?.pollGitContext()
+            }
+        }
+    }
+
+    private func stopGitPolling() {
+        guard gitPollingTimer != nil || workspaceActivationObserver != nil else { return }
+        logger.info("Stopping background git polling")
+        gitPollingTimer?.invalidate()
+        gitPollingTimer = nil
+        lastPolledTerminalPID = nil
+        if let observer = workspaceActivationObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(observer)
+            workspaceActivationObserver = nil
+        }
+    }
+
+    private func pollGitContext() {
+        guard let frontApp = NSWorkspace.shared.frontmostApplication,
+              let bundleID = frontApp.bundleIdentifier,
+              GitContextService.isTerminal(bundleID: bundleID) else { return }
+
+        let pid = frontApp.processIdentifier
+        lastPolledTerminalPID = pid
+        Task {
+            let context = await GitContextService.detect(terminalPID: pid)
+            // Only update if not currently recording (during recording, keep stable context)
+            if self.recordingState == .idle {
+                self.gitContext = context
+            }
+        }
     }
 
     // MARK: - Overlay Lifecycle
@@ -263,14 +334,15 @@ final class AppState: ObservableObject {
         logger.info("Starting recording")
         targetBundleID = textInjector.captureFrontmostApp()
 
-        // Detect git context asynchronously if the frontmost app is a terminal
-        gitContext = nil
-        if GitContextService.isTerminal(bundleID: targetBundleID),
-           let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier {
-            Task {
-                let context = await GitContextService.detect(terminalPID: pid)
-                if self.recordingState != .idle {
-                    self.gitContext = context
+        // Use pre-fetched git context from polling if available; otherwise fetch on-demand
+        if gitContext == nil {
+            if GitContextService.isTerminal(bundleID: targetBundleID),
+               let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier {
+                Task {
+                    let context = await GitContextService.detect(terminalPID: pid)
+                    if self.recordingState != .idle {
+                        self.gitContext = context
+                    }
                 }
             }
         }
