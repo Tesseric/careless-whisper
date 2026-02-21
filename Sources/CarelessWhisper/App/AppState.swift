@@ -231,7 +231,7 @@ final class AppState: ObservableObject {
             do {
                 let text = try await whisperService.transcribe(samples: chunk)
                 let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !trimmed.isEmpty && !Self.isSilenceMarker(trimmed) {
+                if !trimmed.isEmpty && !Self.isNonSpeechHallucination(trimmed) {
                     if liveTranscription.isEmpty {
                         liveTranscription = trimmed
                     } else {
@@ -287,7 +287,7 @@ final class AppState: ObservableObject {
                 do {
                     let text = try await whisperService.transcribe(samples: finalChunkSamples)
                     let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !trimmed.isEmpty && !Self.isSilenceMarker(trimmed) {
+                    if !trimmed.isEmpty && !Self.isNonSpeechHallucination(trimmed) {
                         if liveTranscription.isEmpty {
                             liveTranscription = trimmed
                         } else {
@@ -328,26 +328,83 @@ final class AppState: ObservableObject {
         }
     }
 
-    /// Whisper hallucinates bracketed markers like "[silence]", "(silence)", "[BLANK_AUDIO]" etc.
-    /// when it hears no speech — filter these out.
-    private static func isSilenceMarker(_ text: String) -> Bool {
-        let lower = text.lowercased()
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .trimmingCharacters(in: .punctuationCharacters)
-        let markers: Set<String> = [
-            "silence", "blank audio", "blank_audio", "no speech", "no audio",
-            "inaudible", "music", "background noise", "noise",
-            "applause", "laughter",
-        ]
-        // Match both "[silence]" and bare "silence" etc.
-        let stripped = lower
+    /// Whisper hallucinates non-speech content in various forms: bracketed/parenthesized/
+    /// asterisk-wrapped sound descriptions (e.g., "[wind]", "(music)", "*sighs*"), music
+    /// note symbols, bare ambient sound words, and repetitive filler phrases. Filter all
+    /// of these so we only inject actual spoken words.
+    nonisolated static func isNonSpeechHallucination(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return true }
+
+        // Structural: entire text wrapped in brackets, parens, or asterisks
+        if (trimmed.hasPrefix("[") && trimmed.hasSuffix("]")) ||
+            (trimmed.hasPrefix("(") && trimmed.hasSuffix(")")) ||
+            (trimmed.hasPrefix("*") && trimmed.hasSuffix("*") && trimmed.count > 1) {
+            return true
+        }
+
+        // Music note symbols
+        if trimmed.contains("♪") || trimmed.contains("🎵") || trimmed.contains("🎶") {
+            return true
+        }
+
+        // Strip brackets/parens/asterisks and punctuation, then exact-match
+        let stripped = trimmed.lowercased()
             .replacingOccurrences(of: "[", with: "")
             .replacingOccurrences(of: "]", with: "")
             .replacingOccurrences(of: "(", with: "")
             .replacingOccurrences(of: ")", with: "")
-            .trimmingCharacters(in: .whitespaces)
-        return markers.contains(stripped)
+            .replacingOccurrences(of: "*", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: .punctuationCharacters)
+
+        return nonSpeechMarkers.contains(stripped)
     }
+
+    private nonisolated static let nonSpeechMarkers: Set<String> = [
+        // Silence / blank
+        "silence", "blank audio", "blank_audio", "no speech", "no audio",
+        "inaudible",
+        // Environmental sounds
+        "noise", "background noise", "static", "white noise",
+        "wind", "wind blowing", "wind howling", "wind noise",
+        "thunder", "rain", "rain falling", "rain sounds",
+        "water", "water running", "water dripping", "water flowing",
+        "birds", "birds chirping", "birds singing", "bird sounds",
+        "dog barking", "dogs barking",
+        "crickets", "insects",
+        // Human non-speech sounds
+        "breathing", "heavy breathing", "deep breathing",
+        "footsteps", "typing", "clicking", "tapping",
+        "coughing", "cough", "snoring", "snore",
+        "sigh", "sighs", "sighing",
+        "laugh", "laughs", "laughing", "laughter",
+        "gasp", "gasps", "gasping",
+        "groan", "groans", "groaning",
+        "yawn", "yawns", "yawning",
+        "sneeze", "sneezes", "sneezing",
+        "clears throat", "throat clearing",
+        "applause", "clapping",
+        // Music descriptions
+        "music", "music playing", "background music",
+        "eerie music", "soft music", "dramatic music", "upbeat music",
+        "piano music", "sad music", "intense music", "suspenseful music",
+        "ominous music", "cheerful music", "gentle music", "classical music",
+        "haunting music", "somber music", "tense music", "light music",
+        // Mechanical / urban sounds
+        "phone ringing", "bell ringing", "bell",
+        "door closing", "door opening", "door slam",
+        "engine", "engine running", "car horn", "siren",
+        "beep", "beeping", "buzzing", "buzz", "humming", "hum",
+        "whistling", "whistle",
+        // Crowd / chatter
+        "crowd noise", "crowd cheering", "crowd",
+        "chatter", "indistinct chatter", "indistinct talking",
+        "chanting",
+        // Common Whisper silence hallucinations (repetitive filler)
+        "thank you", "thanks for watching", "thanks for listening",
+        "subscribe", "like and subscribe",
+    ]
 }
 
 extension NSSound {

@@ -28,7 +28,7 @@ final class WhisperService: Sendable {
         }.value
 
         let text = segments.map(\.text)
-            .filter { !$0.contains("[BLANK_AUDIO]") }
+            .filter { !AppState.isNonSpeechHallucination($0) }
             .joined(separator: " ")
         logger.info("Transcription complete: \(text.prefix(100))")
         return text
