@@ -34,6 +34,28 @@ When you record from a terminal (Kitty, iTerm2, Terminal.app, Warp, Ghostty, Ala
 
 All of this context appears in the floating HUD while you're recording — a glanceable snapshot of your working state without leaving the terminal.
 
+## Agent Overlay
+
+AI agents like [Claude Code](https://docs.anthropic.com/en/docs/claude-code) can push rich HTML widgets to the floating overlay while you work. Enable **Agent Integration** in Settings to start the local overlay server and install the Claude Code skill automatically.
+
+When agent widgets are visible and you start recording, the overlay expands into a **dual-column layout** — your git context on one side, agent widgets on the other — giving you a complete picture of what both you and your agent are doing.
+
+### What agents can display
+
+- Build status and test results
+- Progress indicators and dashboards
+- SVG charts and visualizations
+- Any HTML/CSS/JS content
+
+### How it works
+
+1. Enable **Agent Integration** in Settings
+2. A local HTTP server starts on `127.0.0.1` with bearer token auth
+3. A Claude Code skill is auto-installed to `~/.claude/skills/overlay/`
+4. Agents use the `overlay-cli` script to show, update, and dismiss widgets
+
+The server binds to localhost only, uses a random auth token per session, and the discovery file (`~/.careless-whisper/server.json`) is restricted to owner-only permissions.
+
 ## Features
 
 - **Local transcription** via [SwiftWhisper](https://github.com/exPHAT/SwiftWhisper) (whisper.cpp) — no API keys or internet required
@@ -110,6 +132,13 @@ CarelessWhisperApp (entry point)
 │   └── GitContextService — terminal detection, process tree CWD discovery,
 │                           git status/branch/diff parsing, GitHub CI/PR via gh CLI
 │
+├── Server/
+│   ├── OverlayServer        — NWListener HTTP server (localhost, bearer token auth)
+│   ├── HTTPConnection       — single-connection HTTP/1.1 request parser + response writer
+│   ├── HTMLComposer         — widget HTML composition, sanitization, and CSP
+│   ├── WidgetModels         — Codable widget/request/response types
+│   └── AgentSkillInstaller  — auto-installs Claude Code skill + CLI to ~/.claude/
+│
 ├── HotKey/
 │   └── HotKeyManager — global hotkey registration with UserDefaults persistence
 │
@@ -118,7 +147,8 @@ CarelessWhisperApp (entry point)
 │
 └── UI/
     ├── SettingsView/Window  — SwiftUI settings (hotkey, model, device, toggles)
-    ├── RecordingOverlay     — floating NSPanel HUD with dev dashboard
+    ├── RecordingOverlay     — floating NSPanel HUD with dual-column dev dashboard
+    ├── WidgetWebView        — WKWebView wrapper for rendering agent HTML widgets
     └── MenuBarView          — SwiftUI menu bar content
 ```
 
@@ -134,11 +164,14 @@ Access settings from the menu bar icon. Available options:
 | **Completion Sound** | Play a sound when transcription finishes |
 | **Press Enter** | Automatically press Enter after injecting text |
 | **Launch at Login** | Start the app automatically on login |
+| **Agent Integration** | Enable overlay server for AI agent widgets |
 
 ## Dependencies
 
 - [SwiftWhisper](https://github.com/exPHAT/SwiftWhisper) — whisper.cpp Swift bindings
 - [HotKey](https://github.com/soffes/HotKey) — global hotkey registration
+- WebKit (system) — agent widget HTML rendering
+- Network (system) — overlay HTTP server
 
 ## License
 
