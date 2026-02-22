@@ -94,13 +94,34 @@ enum HTMLComposer {
           \(cards)
           <script>
           function _updateWidgetParams(widgetId, params) {
-            var c = document.querySelector('[data-widget-id="' + widgetId + '"]');
+            function escAttr(val) {
+              val = String(val);
+              if (window.CSS && window.CSS.escape) {
+                return window.CSS.escape(val);
+              }
+              return val.replace(/"/g, '\\"').replace(/]/g, '\\]');
+            }
+
+            var c;
+            try {
+              c = document.querySelector('[data-widget-id="' + escAttr(widgetId) + '"]');
+            } catch (e) {
+              return false;
+            }
             if (!c) return false;
             for (var key in params) {
+              if (!Object.prototype.hasOwnProperty.call(params, key)) continue;
               var val = params[key];
               c.style.setProperty('--' + key, val);
-              var els = c.querySelectorAll('[data-param="' + key + '"]');
-              for (var i = 0; i < els.length; i++) els[i].textContent = val;
+              var els;
+              try {
+                els = c.querySelectorAll('[data-param="' + escAttr(key) + '"]');
+              } catch (e) {
+                continue;
+              }
+              for (var i = 0; i < els.length; i++) {
+                els[i].textContent = val;
+              }
             }
             return true;
           }
@@ -113,19 +134,57 @@ enum HTMLComposer {
     // MARK: - Param Substitution
 
     /// Replaces `{{key}}` placeholders in the HTML template with values from the params dictionary.
+    /// Uses single-pass regex matching to avoid re-substitution if values contain `{{...}}`.
     static func substituteParams(_ html: String, params: [String: String]?) -> String {
         guard let params, !params.isEmpty else { return html }
-        var result = html
-        for (key, value) in params {
-            result = result.replacingOccurrences(of: "{{\(key)}}", with: value)
+
+        let pattern = #"\{\{([^}]+)\}\}"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
+            return html
         }
-        return result
+
+        let fullRange = NSRange(html.startIndex..<html.endIndex, in: html)
+        let matches = regex.matches(in: html, options: [], range: fullRange)
+
+        // Build result by replacing matches from end to start to keep ranges valid.
+        var result = html as NSString
+        for match in matches.reversed() {
+            guard match.numberOfRanges >= 2 else { continue }
+            let keyRange = match.range(at: 1)
+            guard keyRange.location != NSNotFound,
+                  let swiftKeyRange = Range(keyRange, in: html) else {
+                continue
+            }
+
+            let key = String(html[swiftKeyRange])
+            guard let value = params[key] else { continue }
+
+            result = result.replacingCharacters(in: match.range, with: value) as NSString
+        }
+
+        return result as String
+    }
+
+    /// Sanitizes a string to be safe for use as a CSS custom property identifier.
+    static func sanitizeCSSIdentifier(_ input: String) -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
+        return String(input.unicodeScalars.filter { allowed.contains($0) })
+    }
+
+    /// Sanitizes a string to be safe for use as a CSS value within an inline `style` attribute.
+    static func sanitizeCSSValue(_ input: String) -> String {
+        let forbidden = CharacterSet(charactersIn: ";\n\r")
+        return String(input.unicodeScalars.filter { !forbidden.contains($0) })
     }
 
     /// Generates an inline `style` attribute fragment setting CSS custom properties for each param.
     private static func cssCustomProperties(_ params: [String: String]?) -> String {
         guard let params, !params.isEmpty else { return "" }
-        let props = params.map { "--\(escapeHTML($0.key)): \(escapeHTML($0.value))" }.joined(separator: "; ")
+        let props = params.map { (key, value) in
+            let safeKey = sanitizeCSSIdentifier(key)
+            let safeValue = sanitizeCSSValue(value)
+            return "--\(escapeHTML(safeKey)): \(escapeHTML(safeValue))"
+        }.joined(separator: "; ")
         return " style=\"\(props)\""
     }
 

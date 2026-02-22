@@ -9,12 +9,11 @@ final class WidgetWebViewBridge {
 
     func updateParams(widgetId: String, params: [String: String]) {
         guard let webView else { return }
-        guard let data = try? JSONSerialization.data(withJSONObject: params),
-              let json = String(data: data, encoding: .utf8) else { return }
-        let escapedId = widgetId
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "'", with: "\\'")
-        webView.evaluateJavaScript("_updateWidgetParams('\(escapedId)', \(json))") { _, error in
+        guard let widgetIdData = try? JSONEncoder().encode(widgetId),
+              let widgetIdJSON = String(data: widgetIdData, encoding: .utf8),
+              let paramsData = try? JSONSerialization.data(withJSONObject: params),
+              let paramsJSON = String(data: paramsData, encoding: .utf8) else { return }
+        webView.evaluateJavaScript("_updateWidgetParams(\(widgetIdJSON), \(paramsJSON))") { _, error in
             if let error {
                 // Silently ignore — page may not be loaded yet; next full compose will include latest params
                 _ = error

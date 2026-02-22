@@ -38,20 +38,6 @@ final class AppState: ObservableObject {
     /// Bridge for injecting JavaScript into the widget WKWebView.
     let widgetBridge = WidgetWebViewBridge()
 
-    /// Widgets with latest param overrides merged in, used by HTMLComposer.
-    var composableWidgets: [AgentWidget] {
-        agentWidgets.map { widget in
-            guard let overrides = widgetParamOverrides[widget.id], !overrides.isEmpty else {
-                return widget
-            }
-            var merged = widget
-            var params = widget.params ?? [:]
-            params.merge(overrides) { _, new in new }
-            merged.params = params
-            return merged
-        }
-    }
-
     let audioCaptureService = AudioCaptureService()
     let whisperService = WhisperService()
     let modelManager = ModelManager()

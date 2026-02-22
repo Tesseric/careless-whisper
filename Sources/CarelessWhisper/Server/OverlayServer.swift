@@ -257,21 +257,15 @@ final class OverlayServer {
 
     // MARK: - Temp file cleanup
 
-    /// Temp files the skill instructs agents to write for CLI commands.
-    private static let tempFiles = [
-        "/tmp/overlay-widgets.json",
-        "/tmp/overlay-widget.json",
-        "/tmp/overlay-params.json",
-    ]
-
-    /// Remove stale temp files left over from previous sessions.
+    /// Remove stale `overlay-*.json` temp files left over from previous sessions.
     func removeTempFiles() {
         let fm = FileManager.default
-        for path in Self.tempFiles {
-            if fm.fileExists(atPath: path) {
-                try? fm.removeItem(atPath: path)
-                logger.info("Removed stale temp file: \(path)")
-            }
+        let tmpDir = "/tmp"
+        guard let contents = try? fm.contentsOfDirectory(atPath: tmpDir) else { return }
+        for filename in contents where filename.hasPrefix("overlay-") && filename.hasSuffix(".json") {
+            let path = "\(tmpDir)/\(filename)"
+            try? fm.removeItem(atPath: path)
+            logger.info("Removed stale temp file: \(path)")
         }
     }
 }
