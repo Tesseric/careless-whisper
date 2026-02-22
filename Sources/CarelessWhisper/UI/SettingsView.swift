@@ -192,12 +192,38 @@ struct SettingsView: View {
                     }
 
                     HStack(spacing: 4) {
-                        Image(systemName: AgentSkillInstaller.isInstalled ? "checkmark.circle.fill" : "xmark.circle.fill")
-                            .foregroundStyle(AgentSkillInstaller.isInstalled ? .green : .red)
-                            .frame(width: 16)
-                        Text("Claude Code skill installed at ~/.claude/skills/overlay/")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                        if AgentSkillInstaller.isUpToDate {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                                .frame(width: 16)
+                            Text("Claude Code skill installed at ~/.claude/skills/overlay/")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else if AgentSkillInstaller.isInstalled {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                                .frame(width: 16)
+                            Text("Claude Code skill outdated")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Button("Update") {
+                                AgentSkillInstaller.install()
+                            }
+                            .controlSize(.small)
+                        } else {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.red)
+                                .frame(width: 16)
+                            Text("Claude Code skill not installed")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Button("Install") {
+                                AgentSkillInstaller.install()
+                            }
+                            .controlSize(.small)
+                        }
                     }
                 }
                 .padding(.leading, 4)

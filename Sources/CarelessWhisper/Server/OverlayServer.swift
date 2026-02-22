@@ -147,8 +147,14 @@ final class OverlayServer {
         guard let body = request.body else {
             return HTTPResponse(status: 400, body: ["error": "Missing request body"])
         }
-        guard let showRequest = try? JSONDecoder().decode(ShowOverlayRequest.self, from: body) else {
+        guard var showRequest = try? JSONDecoder().decode(ShowOverlayRequest.self, from: body) else {
             return HTTPResponse(status: 400, body: ["error": "Invalid JSON"])
+        }
+
+        for i in showRequest.widgets.indices {
+            if let errorResponse = resolveTemplate(&showRequest.widgets[i]) {
+                return errorResponse
+            }
         }
 
         await MainActor.run {
@@ -162,8 +168,12 @@ final class OverlayServer {
         guard let body = request.body else {
             return HTTPResponse(status: 400, body: ["error": "Missing request body"])
         }
-        guard let updateRequest = try? JSONDecoder().decode(UpdateWidgetRequest.self, from: body) else {
+        guard var updateRequest = try? JSONDecoder().decode(UpdateWidgetRequest.self, from: body) else {
             return HTTPResponse(status: 400, body: ["error": "Invalid JSON"])
+        }
+
+        if let errorResponse = resolveTemplate(&updateRequest.widget) {
+            return errorResponse
         }
 
         await MainActor.run {
@@ -217,6 +227,26 @@ final class OverlayServer {
             "widgetCount": count,
             "overlayVisible": visible
         ])
+    }
+
+    // MARK: - Template Resolution
+
+    /// Resolves a template-based widget into HTML. Returns an HTTP 400 response on error, nil on success.
+    private func resolveTemplate(_ widget: inout AgentWidget) -> HTTPResponse? {
+        guard let templateName = widget.template else {
+            // No template — require html
+            if widget.html.isEmpty {
+                return HTTPResponse(status: 400, body: ["error": "Widget must have either 'template' or 'html'"])
+            }
+            return nil
+        }
+
+        do {
+            widget.html = try WidgetTemplateRegistry.render(template: templateName, params: widget.params)
+        } catch {
+            return HTTPResponse(status: 400, body: ["error": error.localizedDescription])
+        }
+        return nil
     }
 
     // MARK: - Port file
