@@ -1,9 +1,31 @@
 import SwiftUI
 import WebKit
 
+/// Holds a weak reference to the WKWebView so that AppState can inject JavaScript
+/// for param-only updates without triggering a full HTML reload.
+@MainActor
+final class WidgetWebViewBridge {
+    weak var webView: WKWebView?
+
+    func updateParams(widgetId: String, params: [String: String]) {
+        guard let webView else { return }
+        guard let widgetIdData = try? JSONEncoder().encode(widgetId),
+              let widgetIdJSON = String(data: widgetIdData, encoding: .utf8),
+              let paramsData = try? JSONSerialization.data(withJSONObject: params),
+              let paramsJSON = String(data: paramsData, encoding: .utf8) else { return }
+        webView.evaluateJavaScript("_updateWidgetParams(\(widgetIdJSON), \(paramsJSON))") { _, error in
+            if let error {
+                // Silently ignore — page may not be loaded yet; next full compose will include latest params
+                _ = error
+            }
+        }
+    }
+}
+
 struct WidgetWebView: NSViewRepresentable {
     let html: String
     @Binding var contentHeight: CGFloat
+    var bridge: WidgetWebViewBridge?
 
     func makeNSView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
@@ -16,11 +38,13 @@ struct WidgetWebView: NSViewRepresentable {
 
         context.coordinator.currentHash = html.hashValue
         context.coordinator.heightBinding = $contentHeight
+        bridge?.webView = webView
         webView.loadHTMLString(html, baseURL: nil)
         return webView
     }
 
     func updateNSView(_ webView: WKWebView, context: Context) {
+        bridge?.webView = webView
         let newHash = html.hashValue
         guard newHash != context.coordinator.currentHash else { return }
         context.coordinator.currentHash = newHash

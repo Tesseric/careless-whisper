@@ -292,8 +292,11 @@ struct OverlayContentView: View {
 
     @ViewBuilder
     private var widgetView: some View {
+        // Use base agentWidgets (without param overrides) so the HTML hash stays stable
+        // for param-only changes. Param updates go through JS injection via widgetBridge,
+        // avoiding a full loadHTMLString reload that would cause flicker and break CSS transitions.
         let composed = HTMLComposer.compose(widgets: appState.agentWidgets)
-        WidgetWebView(html: composed, contentHeight: $webViewHeight)
+        WidgetWebView(html: composed, contentHeight: $webViewHeight, bridge: appState.widgetBridge)
             .frame(height: webViewHeight)
             .onChange(of: webViewHeight) { _, newHeight in
                 appState.widgetContentHeight = newHeight

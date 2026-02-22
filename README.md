@@ -10,7 +10,7 @@ A macOS menu bar app for **push-to-talk voice-to-text** built for developers who
 
 When you're pair-programming with an AI agent and your hands are on the keyboard, Careless Whisper gives you a voice channel to your tools. Hold a hotkey, speak, release — your words appear exactly where your cursor is.
 
-![Careless Whisper recording overlay](assets/overlay.png)
+[![Careless Whisper demo](assets/hero.png)](https://youtu.be/eTeb47Qa5DE)
 
 ## How It Works
 
@@ -47,14 +47,19 @@ When agent widgets are visible and you start recording, the overlay expands into
 - SVG charts and visualizations
 - Any HTML/CSS/JS content
 
+### Parameterized widgets
+
+Widgets support a `params` dictionary with `{{key}}` template placeholders in HTML. Agents can update individual parameter values live via the `set-params` command — the overlay updates in-place via JavaScript injection with no flicker or full page reload, so CSS transitions animate smoothly.
+
 ### How it works
 
 1. Enable **Agent Integration** in Settings
 2. A local HTTP server starts on `127.0.0.1` with bearer token auth
 3. A Claude Code skill is auto-installed to `~/.claude/skills/overlay/`
-4. Agents use the `overlay-cli` script to show, update, and dismiss widgets
+4. Agents use the `overlay-cli` script to show, update, set-params, and dismiss widgets
+5. Run `~/.claude/skills/overlay/demo.sh` to see all visualization types in action
 
-The server binds to localhost only, uses a random auth token per session, and the discovery file (`~/.careless-whisper/server.json`) is restricted to owner-only permissions.
+The server binds to localhost only, uses a random auth token per session, and the discovery file (`~/.careless-whisper/server.json`) is restricted to owner-only permissions. Stale temp files from previous sessions are cleaned up automatically on server start.
 
 ## Features
 
@@ -149,6 +154,7 @@ CarelessWhisperApp (entry point)
     ├── SettingsView/Window  — SwiftUI settings (hotkey, model, device, toggles)
     ├── RecordingOverlay     — floating NSPanel HUD with dual-column dev dashboard
     ├── WidgetWebView        — WKWebView wrapper for rendering agent HTML widgets
+    ├── WidgetWebViewBridge  — JS injection bridge for live param updates without reload
     └── MenuBarView          — SwiftUI menu bar content
 ```
 

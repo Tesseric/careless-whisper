@@ -5,12 +5,14 @@ struct AgentWidget: Codable, Identifiable, Equatable {
     var title: String?
     var html: String
     var priority: Int
+    var params: [String: String]?
 
-    init(id: String, title: String? = nil, html: String, priority: Int = 0) {
+    init(id: String, title: String? = nil, html: String, priority: Int = 0, params: [String: String]? = nil) {
         self.id = id
         self.title = title
         self.html = html
         self.priority = priority
+        self.params = params
     }
 }
 
@@ -22,6 +24,11 @@ struct ShowOverlayRequest: Codable {
 
 struct UpdateWidgetRequest: Codable {
     let widget: AgentWidget
+}
+
+struct UpdateParamsRequest: Codable {
+    let id: String?
+    let params: [String: String]
 }
 
 // MARK: - Response model

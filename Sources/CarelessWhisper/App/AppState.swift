@@ -31,6 +31,13 @@ final class AppState: ObservableObject {
     @Published var gitContextSide: Edge = .trailing
     @Published var overlayDualColumn: Bool = false
 
+    /// Per-widget param overrides applied by `set-params`. Stored separately so that
+    /// param-only updates can go through JS injection without triggering a full HTML reload.
+    private var widgetParamOverrides: [String: [String: String]] = [:]
+
+    /// Bridge for injecting JavaScript into the widget WKWebView.
+    let widgetBridge = WidgetWebViewBridge()
+
     let audioCaptureService = AudioCaptureService()
     let whisperService = WhisperService()
     let modelManager = ModelManager()
@@ -153,6 +160,9 @@ final class AppState: ObservableObject {
         overlayServer.onUpsertWidget = { [weak self] widget in
             self?.upsertAgentWidget(widget)
         }
+        overlayServer.onUpdateParams = { [weak self] id, params in
+            self?.updateWidgetParams(id: id, params: params)
+        }
         overlayServer.onRemoveWidget = { [weak self] id in
             self?.removeAgentWidget(id: id)
         }
@@ -174,11 +184,13 @@ final class AppState: ObservableObject {
     // MARK: - Agent Widget CRUD
 
     func setAgentWidgets(_ widgets: [AgentWidget]) {
+        widgetParamOverrides.removeAll()
         agentWidgets = widgets
         updateOverlayVisibility()
     }
 
     func upsertAgentWidget(_ widget: AgentWidget) {
+        widgetParamOverrides.removeValue(forKey: widget.id)
         if let index = agentWidgets.firstIndex(where: { $0.id == widget.id }) {
             agentWidgets[index] = widget
         } else {
@@ -188,13 +200,23 @@ final class AppState: ObservableObject {
     }
 
     func removeAgentWidget(id: String) {
+        widgetParamOverrides.removeValue(forKey: id)
         agentWidgets.removeAll { $0.id == id }
         updateOverlayVisibility()
     }
 
     func clearAgentWidgets() {
         agentWidgets.removeAll()
+        widgetParamOverrides.removeAll()
         updateOverlayVisibility()
+    }
+
+    func updateWidgetParams(id: String, params: [String: String]) {
+        guard agentWidgets.contains(where: { $0.id == id }) else { return }
+        var existing = widgetParamOverrides[id] ?? [:]
+        existing.merge(params) { _, new in new }
+        widgetParamOverrides[id] = existing
+        widgetBridge.updateParams(widgetId: id, params: params)
     }
 
     // MARK: - Git Polling

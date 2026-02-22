@@ -10,7 +10,7 @@ final class HTMLComposerTests: XCTestCase {
         XCTAssertTrue(html.contains("<!DOCTYPE html>"))
         XCTAssertTrue(html.contains("Content-Security-Policy"))
         // CSS contains .widget-card class, but no actual widget card divs
-        XCTAssertFalse(html.contains("data-widget-id"))
+        XCTAssertFalse(html.contains("<div class=\"widget-card\""))
     }
 
     func testComposeSingleWidget() {
@@ -155,5 +155,74 @@ final class HTMLComposerTests: XCTestCase {
         XCTAssertEqual(HTMLComposer.escapeHTML("<script>"), "&lt;script&gt;")
         XCTAssertEqual(HTMLComposer.escapeHTML("a & b"), "a &amp; b")
         XCTAssertEqual(HTMLComposer.escapeHTML("\"quoted\""), "&quot;quoted&quot;")
+    }
+
+    // MARK: - Param Substitution
+
+    func testSubstituteParamsReplacesPlaceholders() {
+        let html = "<p>{{status}}</p><span>{{count}} items</span>"
+        let result = HTMLComposer.substituteParams(html, params: ["status": "OK", "count": "42"])
+        XCTAssertEqual(result, "<p>OK</p><span>42 items</span>")
+    }
+
+    func testSubstituteParamsNilParams() {
+        let html = "<p>{{status}}</p>"
+        let result = HTMLComposer.substituteParams(html, params: nil)
+        XCTAssertEqual(result, html)
+    }
+
+    func testSubstituteParamsEmptyParams() {
+        let html = "<p>{{status}}</p>"
+        let result = HTMLComposer.substituteParams(html, params: [:])
+        XCTAssertEqual(result, html)
+    }
+
+    func testSubstituteParamsLeavesUnmatchedPlaceholders() {
+        let html = "<p>{{known}}</p><p>{{unknown}}</p>"
+        let result = HTMLComposer.substituteParams(html, params: ["known": "val"])
+        XCTAssertEqual(result, "<p>val</p><p>{{unknown}}</p>")
+    }
+
+    func testSubstituteParamsMultipleOccurrences() {
+        let html = "<span>{{x}}</span> and <span>{{x}}</span>"
+        let result = HTMLComposer.substituteParams(html, params: ["x": "hi"])
+        XCTAssertEqual(result, "<span>hi</span> and <span>hi</span>")
+    }
+
+    func testComposeWithParams() {
+        let widget = AgentWidget(
+            id: "p",
+            html: "<p data-param=\"msg\">{{msg}}</p>",
+            params: ["msg": "hello"]
+        )
+        let html = HTMLComposer.compose(widgets: [widget])
+        // Param should be substituted in rendered output
+        XCTAssertTrue(html.contains("<p data-param=\"msg\">hello</p>"))
+        // CSS custom property should be set on the widget container
+        XCTAssertTrue(html.contains("--msg: hello"))
+        // JS update function should be embedded
+        XCTAssertTrue(html.contains("_updateWidgetParams"))
+    }
+
+    func testComposeWithParamsSetsCSSCustomProperties() {
+        let widget = AgentWidget(
+            id: "css",
+            html: "<div style='width:var(--pct)'></div>",
+            params: ["pct": "50%"]
+        )
+        let html = HTMLComposer.compose(widgets: [widget])
+        XCTAssertTrue(html.contains("--pct: 50%"))
+    }
+
+    func testComposeWithoutParamsHasNoInlineStyle() {
+        let widget = AgentWidget(id: "nosty", html: "<p>plain</p>")
+        let html = HTMLComposer.compose(widgets: [widget])
+        // The widget-card div should not have an inline style attribute
+        let cardStart = html.range(of: "data-widget-id=\"nosty\"")!
+        let beforeCard = html[html.startIndex..<cardStart.lowerBound]
+        // Find the opening tag
+        let tagStart = beforeCard.range(of: "<div", options: .backwards)!.lowerBound
+        let tagContent = String(html[tagStart..<cardStart.upperBound])
+        XCTAssertFalse(tagContent.contains("style="))
     }
 }
