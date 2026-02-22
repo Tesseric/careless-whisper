@@ -135,69 +135,20 @@ final class KittyIPC: TextInjector {
 
     /// Build --to= argument if we can find the Kitty socket.
     private func socketArguments() -> [String] {
-        // 1. Check KITTY_LISTEN_ON env var
-        if let listenOn = ProcessInfo.processInfo.environment["KITTY_LISTEN_ON"], !listenOn.isEmpty {
-            logger.info("Using KITTY_LISTEN_ON: \(listenOn)")
-            return ["--to", listenOn]
-        }
-
-        // 2. Scan /tmp for kitty-* unix socket files (named by PID, e.g. /tmp/kitty-12345)
-        if let socket = findKittySocket() {
-            let socketURL = "unix:\(socket)"
+        if let socketURL = KittyRemoteControl.findSocket() {
             logger.info("Found Kitty socket: \(socketURL)")
             return ["--to", socketURL]
         }
 
-        // 3. No socket found — cannot use kitten from a GUI app without --to
         logger.info("No Kitty socket found")
         return []
     }
 
-    private func findKittySocket() -> String? {
-        let fm = FileManager.default
-        guard let contents = try? fm.contentsOfDirectory(atPath: "/tmp") else { return nil }
-
-        let uid = getuid()
-        // Kitty creates sockets at /tmp/kitty-<pid> owned by the current user
-        let sockets = contents
-            .filter { $0.hasPrefix("kitty-") }
-            .map { "/tmp/\($0)" }
-            .filter { path in
-                // Must be a socket (exists but is not a directory or regular file)
-                var isDir: ObjCBool = false
-                guard fm.fileExists(atPath: path, isDirectory: &isDir), !isDir.boolValue else { return false }
-                // Must be owned by us
-                guard let attrs = try? fm.attributesOfItem(atPath: path),
-                      let ownerID = attrs[.ownerAccountID] as? UInt, ownerID == uid else { return false }
-                // Verify it's a socket via file type
-                guard let fileType = attrs[.type] as? FileAttributeType, fileType == .typeSocket else { return false }
-                return true
-            }
-            .sorted { a, b in
-                let aDate = (try? fm.attributesOfItem(atPath: a)[.modificationDate] as? Date) ?? .distantPast
-                let bDate = (try? fm.attributesOfItem(atPath: b)[.modificationDate] as? Date) ?? .distantPast
-                return aDate > bDate
-            }
-
-        return sockets.first
-    }
-
     private func findKitten() throws -> String {
-        let candidates = [
-            "/Applications/kitty.app/Contents/MacOS/kitten",
-            "/usr/local/bin/kitten",
-            "/opt/homebrew/bin/kitten",
-            NSHomeDirectory() + "/.local/bin/kitten",
-            NSHomeDirectory() + "/.local/kitty.app/bin/kitten",
-        ]
-
-        for candidate in candidates {
-            if FileManager.default.isExecutableFile(atPath: candidate) {
-                return candidate
-            }
+        guard let path = KittyRemoteControl.findKittenBinary() else {
+            throw KittyIPCError.kittenNotFound
         }
-
-        throw KittyIPCError.kittenNotFound
+        return path
     }
 }
 
