@@ -1,6 +1,9 @@
 import AppKit
 import SwiftUI
 import Combine
+import os
+
+private let logger = Logger(subsystem: "com.carelesswhisper", category: "StatusBarController")
 
 @MainActor
 final class StatusBarController: NSObject, NSMenuDelegate {
@@ -12,6 +15,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     private var statusMenuItem: NSMenuItem?
     private var recordMenuItem: NSMenuItem?
     private var lastTranscriptionMenuItem: NSMenuItem?
+    private var copyTranscriptionMenuItem: NSMenuItem?
 
     func setup(appState: AppState) {
         self.appState = appState
@@ -38,6 +42,13 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         menu.addItem(lastItem)
         self.lastTranscriptionMenuItem = lastItem
 
+        // Copy Last Transcription
+        let copyItem = NSMenuItem(title: "Copy Last Transcription", action: #selector(copyLastTranscription), keyEquivalent: "c")
+        copyItem.target = self
+        copyItem.isHidden = true
+        menu.addItem(copyItem)
+        self.copyTranscriptionMenuItem = copyItem
+
         menu.addItem(.separator())
 
         // Record toggle
@@ -52,6 +63,16 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         let settingsItem = NSMenuItem(title: "Settings...", action: #selector(openSettings), keyEquivalent: ",")
         settingsItem.target = self
         menu.addItem(settingsItem)
+
+        // Report Issue
+        let reportItem = NSMenuItem(title: "Report Issue...", action: #selector(reportIssue), keyEquivalent: "")
+        reportItem.target = self
+        menu.addItem(reportItem)
+
+        // About
+        let aboutItem = NSMenuItem(title: "About Careless Whisper", action: #selector(showAbout), keyEquivalent: "")
+        aboutItem.target = self
+        menu.addItem(aboutItem)
 
         menu.addItem(.separator())
 
@@ -107,7 +128,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             }
         case .recording:
             let secs = Int(appState.recordingDuration)
-            statusMenuItem?.title = "Recording... \(secs / 60):\(String(format: "%02d", secs % 60))"
+            statusMenuItem?.title = "Listening... \(secs / 60):\(String(format: "%02d", secs % 60))"
         case .transcribing:
             statusMenuItem?.title = "Transcribing..."
         }
@@ -128,8 +149,10 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         // Last transcription
         if appState.lastTranscription.isEmpty {
             lastTranscriptionMenuItem?.isHidden = true
+            copyTranscriptionMenuItem?.isHidden = true
         } else {
             lastTranscriptionMenuItem?.isHidden = false
+            copyTranscriptionMenuItem?.isHidden = false
             let text = appState.lastTranscription
             let truncated = text.count > 60 ? String(text.prefix(60)) + "..." : text
             lastTranscriptionMenuItem?.title = truncated
@@ -149,8 +172,29 @@ final class StatusBarController: NSObject, NSMenuDelegate {
 
     @objc private func openSettings() {
         guard let appState else { return }
-        print("[CarelessWhisper] Opening settings")
+        logger.info("Opening settings")
         appState.openSettings()
+    }
+
+    @objc private func copyLastTranscription() {
+        guard let appState, !appState.lastTranscription.isEmpty else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(appState.lastTranscription, forType: .string)
+    }
+
+    @objc private func reportIssue() {
+        NSWorkspace.shared.open(AppConstants.issuesURL)
+    }
+
+    @objc private func showAbout() {
+        NSApplication.shared.orderFrontStandardAboutPanel(options: [
+            .applicationVersion: Bundle.main.appVersion,
+            .credits: NSAttributedString(
+                string: "100% local voice-to-text for macOS\n\(AppConstants.repoURL.absoluteString)",
+                attributes: [.font: NSFont.systemFont(ofSize: 11)]
+            ),
+        ])
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     @objc private func quit() {

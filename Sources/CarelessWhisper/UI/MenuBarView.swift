@@ -153,7 +153,7 @@ struct MenuBarView: View {
         case .idle:
             if appState.modelDownloadProgress != nil { return appState.downloadLabel ?? "Downloading..." }
             return appState.isModelLoaded ? "Ready" : "Loading model..."
-        case .recording: return "Recording"
+        case .recording: return "Listening"
         case .transcribing: return "Transcribing..."
         }
     }
