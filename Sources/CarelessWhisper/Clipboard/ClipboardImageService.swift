@@ -32,6 +32,12 @@ final class ClipboardImageService {
             .appendingPathComponent(".careless-whisper/images")
     }()
 
+    private static let timestampFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyyMMdd-HHmmss-SSS"
+        return formatter
+    }()
+
     /// Checks the system clipboard for an image.
     /// Returns whether an image is present and the pasteboard's change count for staleness detection.
     func detectClipboardImage() -> (hasImage: Bool, changeCount: Int) {
@@ -70,9 +76,7 @@ final class ClipboardImageService {
         }
 
         // Generate timestamped filename (fractional seconds to avoid collisions)
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyyMMdd-HHmmss-SSS"
-        let timestamp = formatter.string(from: Date())
+        let timestamp = Self.timestampFormatter.string(from: Date())
         let fileName = "clipboard-\(timestamp).png"
         let filePath = directory.appendingPathComponent(fileName)
 

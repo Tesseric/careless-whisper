@@ -17,6 +17,16 @@ final class KeyInterceptor {
     /// Only accessed from the main run loop (where the CGEventTap callback fires).
     private var isActive = false
 
+    deinit {
+        if let tap = eventTap {
+            CGEvent.tapEnable(tap: tap, enable: false)
+            CFMachPortInvalidate(tap)
+        }
+        if let source = runLoopSource {
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
+        }
+    }
+
     /// Creates the CGEventTap on the main run loop. Initially disabled.
     /// Call once during app setup. Fails silently if accessibility is not granted.
     func install() {
