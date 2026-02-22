@@ -324,7 +324,7 @@ struct RecordingStatusBar: View {
                     }
                 }
 
-            Text(recordingState == .recording ? "Recording" : "Transcribing...")
+            Text(recordingState == .recording ? "Listening" : "Transcribing...")
                 .font(.system(.body, weight: .medium))
                 .foregroundStyle(.white)
 

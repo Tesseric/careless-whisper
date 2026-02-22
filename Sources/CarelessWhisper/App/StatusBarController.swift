@@ -128,7 +128,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             }
         case .recording:
             let secs = Int(appState.recordingDuration)
-            statusMenuItem?.title = "Recording... \(secs / 60):\(String(format: "%02d", secs % 60))"
+            statusMenuItem?.title = "Listening... \(secs / 60):\(String(format: "%02d", secs % 60))"
         case .transcribing:
             statusMenuItem?.title = "Transcribing..."
         }
