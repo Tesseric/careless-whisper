@@ -13,9 +13,12 @@ brew install --cask tesseric/careless-whisper/careless-whisper
 3. Grant Microphone and Accessibility permissions when prompted
 4. Hold <kbd>Option</kbd>+<kbd>`</kbd> and speak — text appears at your cursor
 
-A macOS menu bar app for **push-to-talk voice-to-text** built for developers who live in the terminal. Speak naturally to type into your editor, terminal, or SWE agent — transcribed locally via Whisper with zero cloud dependencies.
+A **native macOS companion for terminal-based agentic coding**. When developers move from IDEs to tools like [Claude Code](https://docs.anthropic.com/en/docs/claude-code), Aider, and GitHub Copilot CLI, they gain the power of autonomous agents — but lose conveniences that GUI editors provided for free: voice input, image pasting, glanceable project status, and rich agent UI. Careless Whisper bridges these gaps from the OS layer, where it can do things terminals fundamentally can't.
 
-When you're pair-programming with an AI agent and your hands are on the keyboard, Careless Whisper gives you a voice channel to your tools. Hold a hotkey, speak, release — your words appear exactly where your cursor is.
+- **Voice-to-text** — Hold a hotkey, speak, release. Words appear at your cursor via local Whisper transcription. No API keys, no cloud.
+- **Clipboard image attach** — Terminals can't paste images. Copy a screenshot, hold the hotkey, press `1` — the image is saved to disk and its path is injected alongside your speech.
+- **Dev dashboard** — A floating HUD shows git status, branch, CI, PR info, and live diffs while you record.
+- **Agent overlay** — AI agents push rich HTML widgets (build status, dashboards, visualizations) to the HUD while you work.
 
 [![Careless Whisper demo](assets/hero.png)](https://youtu.be/eTeb47Qa5DE)
 
@@ -24,6 +27,18 @@ When you're pair-programming with an AI agent and your hands are on the keyboard
 1. **Hold a hotkey** (default: `Option+`\`) → the mic starts recording and a floating HUD overlay appears
 2. **Speak** → Voice Activity Detection (VAD) splits speech into chunks, each transcribed in real-time via [whisper.cpp](https://github.com/ggerganov/whisper.cpp)
 3. **Release the hotkey** → the final transcription is assembled and automatically typed into the frontmost app
+
+## Clipboard Image Attach
+
+Terminals can only paste text — when an AI agent asks you to share a screenshot, error dialog, or UI mockup, there's no native way to do it. Careless Whisper bridges this gap:
+
+1. **Copy an image** to your clipboard (e.g. <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>Ctrl</kbd>+<kbd>4</kbd> for a region screenshot)
+2. **Hold the hotkey** — the HUD shows "Image on clipboard — press `1` to attach"
+3. **Press `1`** (or click the indicator) — the image is saved as a PNG to `~/.careless-whisper/images/`
+4. **Speak** (optional) — e.g. "describe what's in this image"
+5. **Release the hotkey** — the transcription + file path are injected together: `describe what's in this image ~/.careless-whisper/images/clipboard-20260222-105710-317.png`
+
+The `1` key is intercepted via a CGEventTap during recording so it doesn't reach the terminal. If there's no image on the clipboard, the indicator doesn't appear and `1` works normally. Images older than 24 hours are automatically pruned.
 
 ## Privacy
 
@@ -159,8 +174,12 @@ CarelessWhisperApp (entry point)
 │   ├── WidgetModels         — Codable widget/request/response types
 │   └── AgentSkillInstaller  — auto-installs Claude Code skill + CLI to ~/.claude/
 │
+├── Clipboard/
+│   └── ClipboardImageService — detect, save, and auto-prune clipboard images
+│
 ├── HotKey/
-│   └── HotKeyManager — global hotkey registration with UserDefaults persistence
+│   ├── HotKeyManager  — global hotkey registration with UserDefaults persistence
+│   └── KeyInterceptor — CGEventTap to intercept/suppress '1' key during recording
 │
 ├── Permissions/
 │   └── PermissionChecker — microphone + accessibility permission handling

@@ -232,6 +232,8 @@ struct OverlayContentView: View {
                     .padding(.trailing, appState.agentWidgets.isEmpty ? 0 : 20)
                 }
 
+                ClipboardImageIndicator()
+
                 if !appState.agentWidgets.isEmpty {
                     // Widgets present: use HStack so git column can slide in/out
                     HStack(alignment: .top, spacing: 12) {
@@ -301,6 +303,49 @@ struct OverlayContentView: View {
             .onChange(of: webViewHeight) { _, newHeight in
                 appState.widgetContentHeight = newHeight
             }
+    }
+}
+
+// MARK: - Clipboard Image Indicator
+
+struct ClipboardImageIndicator: View {
+    @EnvironmentObject var appState: AppState
+
+    var body: some View {
+        if appState.recordingState == .recording && appState.clipboardImageDetected {
+            Button {
+                appState.confirmImageAttach()
+            } label: {
+                HStack(spacing: 6) {
+                    if appState.clipboardImageAttached {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.green)
+                        Text("Image attached")
+                            .font(.system(.caption))
+                            .foregroundStyle(.green)
+                    } else {
+                        Image(systemName: "photo")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.white.opacity(0.7))
+                        Text("Image on clipboard — press")
+                            .font(.system(.caption))
+                            .foregroundStyle(.white.opacity(0.7))
+                        Text("1")
+                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.9))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 3))
+                        Text("to attach")
+                            .font(.system(.caption))
+                            .foregroundStyle(.white.opacity(0.7))
+                    }
+                }
+                .animation(.easeInOut(duration: 0.2), value: appState.clipboardImageAttached)
+            }
+            .buttonStyle(.plain)
+        }
     }
 }
 

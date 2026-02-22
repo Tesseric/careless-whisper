@@ -30,6 +30,9 @@ final class AppState: ObservableObject {
     @Published var widgetContentHeight: CGFloat = 0
     @Published var gitContextSide: Edge = .trailing
     @Published var overlayDualColumn: Bool = false
+    @Published var clipboardImageDetected: Bool = false
+    @Published var clipboardImageAttached: Bool = false
+    var attachedImagePath: String?
 
     /// Per-widget param overrides applied by `set-params`. Stored separately so that
     /// param-only updates can go through JS injection without triggering a full HTML reload.
@@ -44,6 +47,8 @@ final class AppState: ObservableObject {
     let hotKeyManager = HotKeyManager()
     let textInjector = TextInjectorCoordinator()
     let permissionChecker = PermissionChecker()
+    let clipboardImageService = ClipboardImageService()
+    let keyInterceptor = KeyInterceptor()
     private let overlayController = OverlayController()
     let overlayServer = OverlayServer()
     let settingsWindowController = SettingsWindowController()
@@ -56,6 +61,7 @@ final class AppState: ObservableObject {
     private var gitPollingTimer: Timer?
     private var lastPolledTerminalPID: pid_t?
     private var workspaceActivationObserver: Any?
+    private var clipboardChangeCount: Int = 0
 
     @AppStorage("selectedModel") var selectedModelRaw: String = WhisperModel.baseEn.rawValue
     @AppStorage("completionSound") var completionSoundEnabled: Bool = true
@@ -92,6 +98,11 @@ final class AppState: ObservableObject {
                 self?.stopRecordingAndTranscribe()
             }
         }
+        keyInterceptor.onKeyIntercepted = { [weak self] in
+            Task { @MainActor in
+                self?.confirmImageAttach()
+            }
+        }
     }
 
     func updateHotkeyDescription() {
@@ -118,6 +129,7 @@ final class AppState: ObservableObject {
         }
 
         permissionChecker.checkAccessibilityPermission()
+        keyInterceptor.install()
 
         await loadModel()
         hotKeyManager.register()
@@ -382,6 +394,17 @@ final class AppState: ObservableObject {
             liveTranscription = ""
             pendingChunks = []
             isProcessingChunk = false
+
+            // Detect clipboard image
+            let clipboardResult = clipboardImageService.detectClipboardImage()
+            clipboardImageDetected = clipboardResult.hasImage
+            clipboardImageAttached = false
+            attachedImagePath = nil
+            clipboardChangeCount = clipboardResult.changeCount
+            if clipboardResult.hasImage {
+                keyInterceptor.activate()
+            }
+
             updateOverlayVisibility()
             recordingTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
                 Task { @MainActor in
@@ -433,6 +456,7 @@ final class AppState: ObservableObject {
         audioCaptureService.onSpeechChunkReady = nil
         recordingTimer?.invalidate()
         recordingTimer = nil
+        keyInterceptor.deactivate()
 
         let duration = recordingDuration
         logger.info("Stopping recording after \(duration, format: .fixed(precision: 1))s")
@@ -480,7 +504,20 @@ final class AppState: ObservableObject {
                 }
             }
 
-            let finalText = liveTranscription.trimmingCharacters(in: .whitespacesAndNewlines)
+            let spokenText = liveTranscription.trimmingCharacters(in: .whitespacesAndNewlines)
+            let imagePath = attachedImagePath
+
+            // Compose final text: speech + optional image path
+            let finalText: String
+            if let imagePath {
+                if spokenText.isEmpty {
+                    finalText = imagePath
+                } else {
+                    finalText = spokenText + " " + imagePath
+                }
+            } else {
+                finalText = spokenText
+            }
 
             guard !finalText.isEmpty else {
                 logger.info("Empty transcription result")
@@ -506,6 +543,33 @@ final class AppState: ObservableObject {
             if completionSoundEnabled {
                 NSSound.tink?.play()
             }
+        }
+    }
+
+    // MARK: - Clipboard Image Attach
+
+    func confirmImageAttach() {
+        guard recordingState == .recording,
+              clipboardImageDetected,
+              !clipboardImageAttached else { return }
+
+        // Verify clipboard hasn't changed since recording started
+        guard NSPasteboard.general.changeCount == clipboardChangeCount else {
+            logger.info("Clipboard changed since recording started, ignoring attach")
+            clipboardImageDetected = false
+            keyInterceptor.deactivate()
+            return
+        }
+
+        do {
+            let path = try clipboardImageService.saveClipboardImage()
+            clipboardImageAttached = true
+            attachedImagePath = path
+            keyInterceptor.deactivate()
+            logger.info("Image attached: \(path)")
+        } catch {
+            logger.error("Failed to save clipboard image: \(error)")
+            errorMessage = "Failed to save clipboard image: \(error.localizedDescription)"
         }
     }
 
