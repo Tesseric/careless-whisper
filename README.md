@@ -87,9 +87,31 @@ Agents can create common widgets without composing any HTML. Set a `template` na
 
 Templates and raw HTML widgets can be mixed in the same display. Custom HTML/CSS/SVG remains available for specialized visualizations (sparklines, radar charts, heatmaps, etc.).
 
+<p align="center">
+  <img src="assets/widget-progress-steps.png" width="380" alt="Progress bar and steps pipeline templates">
+  <img src="assets/widget-metrics-barchart.png" width="380" alt="Metrics grid and bar chart templates">
+</p>
+<p align="center">
+  <img src="assets/widget-statuslist-table.png" width="380" alt="Status list and table templates">
+  <img src="assets/widget-messages.png" width="380" alt="Message notification templates">
+</p>
+<p align="center">
+  <img src="assets/widget-keyvalue-sparkline.png" width="380" alt="Key-value template and custom sparkline chart">
+</p>
+
 ### Custom widgets
 
 For visualizations that templates can't express, agents send raw HTML directly. Widgets support a `params` dictionary with `{{key}}` template placeholders. Agents can update individual parameter values live via `set-params` — the overlay updates in-place via JavaScript injection with no flicker, so CSS transitions animate smoothly.
+
+<p align="center">
+  <img src="assets/widget-heatmap-equalizer.png" width="380" alt="Custom HTML widgets: commit heatmap and animated equalizer">
+</p>
+
+Multiple widgets stack together for a complete at-a-glance view of what your agent is doing:
+
+<p align="center">
+  <img src="assets/widget-multi-composition.png" width="380" alt="Multiple widgets composed together">
+</p>
 
 ### How it works
 
