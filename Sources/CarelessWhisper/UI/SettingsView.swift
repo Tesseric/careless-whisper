@@ -9,6 +9,7 @@ struct SettingsView: View {
     @AppStorage("launchAtLogin") private var launchAtLogin = false
     @AppStorage("completionSound") private var completionSound = true
     @State private var isRecordingHotkey = false
+    @State private var skillInstallToken = UUID()
 
     var body: some View {
         ScrollView {
@@ -208,7 +209,10 @@ struct SettingsView: View {
                                 .foregroundStyle(.secondary)
                             Spacer()
                             Button("Update") {
-                                AgentSkillInstaller.install()
+                                Task.detached {
+                                    AgentSkillInstaller.install()
+                                    await MainActor.run { skillInstallToken = UUID() }
+                                }
                             }
                             .controlSize(.small)
                         } else {
@@ -220,11 +224,15 @@ struct SettingsView: View {
                                 .foregroundStyle(.secondary)
                             Spacer()
                             Button("Install") {
-                                AgentSkillInstaller.install()
+                                Task.detached {
+                                    AgentSkillInstaller.install()
+                                    await MainActor.run { skillInstallToken = UUID() }
+                                }
                             }
                             .controlSize(.small)
                         }
                     }
+                    .id(skillInstallToken)
                 }
                 .padding(.leading, 4)
             }

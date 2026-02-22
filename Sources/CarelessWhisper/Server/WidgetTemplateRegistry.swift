@@ -82,30 +82,57 @@ enum WidgetTemplateRegistry {
 
     /// Script block for list-based templates that redistributes pipe-delimited param values
     /// to individual DOM elements on live `set-params` updates via MutationObserver.
+    /// Observes the widget card's style attribute directly (where `_updateWidgetParams` sets
+    /// CSS custom properties) and redistributes values to `[data-pipe]` elements.
     private static let pipeRedistributionScript = """
     <script>
     (function(){
       var root = document.currentScript.parentElement;
-      var obs = new MutationObserver(function(muts) {
-        muts.forEach(function(m) {
-          if (m.type !== 'attributes' || m.attributeName !== 'style') return;
-          var el = m.target;
-          if (!el.dataset || !el.dataset.param) return;
-          var key = el.dataset.param;
-          var style = el.getAttribute('style') || '';
+      if (!root) return;
+
+      var card = root.closest('.widget-card') || root.parentElement;
+      if (!card) return;
+
+      function redistribute() {
+        var style = card.getAttribute('style') || '';
+        var pipeItems = root.querySelectorAll('[data-pipe]');
+        if (!pipeItems.length) return;
+
+        var groups = {};
+        for (var i = 0; i < pipeItems.length; i++) {
+          var item = pipeItems[i];
+          if (!item.dataset || !item.dataset.pipe) continue;
+          var key = item.dataset.pipe;
+          if (!groups[key]) groups[key] = [];
+          groups[key].push(item);
+        }
+
+        for (var key in groups) {
+          if (!Object.prototype.hasOwnProperty.call(groups, key)) continue;
           var re = new RegExp('--' + key.replace(/[.*+?^${}()|[\\]\\\\]/g,'\\\\$&') + '\\\\s*:\\\\s*([^;]+)');
           var match = style.match(re);
-          if (!match) return;
+          if (!match) continue;
           var val = match[1].trim();
           var parts = val.split('|');
-          var items = root.querySelectorAll('[data-pipe="' + key + '"]');
-          for (var i = 0; i < items.length && i < parts.length; i++) {
-            items[i].textContent = parts[i];
+          var items = groups[key];
+          for (var j = 0; j < items.length && j < parts.length; j++) {
+            items[j].textContent = parts[j];
           }
-        });
+        }
+      }
+
+      var obs = new MutationObserver(function(muts) {
+        for (var i = 0; i < muts.length; i++) {
+          var m = muts[i];
+          if (m.type === 'attributes' && m.target === card && m.attributeName === 'style') {
+            redistribute();
+            break;
+          }
+        }
       });
-      var card = root.closest('.widget-card') || root.parentElement;
-      if (card) obs.observe(card, { attributes: true, subtree: true });
+
+      obs.observe(card, { attributes: true });
+      redistribute();
     })();
     </script>
     """
@@ -145,7 +172,7 @@ enum WidgetTemplateRegistry {
         for (i, label) in labels.enumerated() {
             let status = i < statuses.count ? statuses[i] : "pending"
             let detail = details.flatMap { i < $0.count ? $0[i] : nil }
-            let (dotColor, dotStyle, textColor) = stepStyle(for: status.trimmingCharacters(in: .whitespaces))
+            let (dotStyle, textColor) = stepStyle(for: status.trimmingCharacters(in: .whitespaces))
             let isLast = i == labels.count - 1
             let margin = isLast ? "" : "margin-bottom:12px;"
 
@@ -160,7 +187,6 @@ enum WidgetTemplateRegistry {
                 """
             }
             html += "  </div>\n"
-            _ = dotColor // suppress unused warning
         }
 
         html += "</div>\n"
@@ -168,18 +194,18 @@ enum WidgetTemplateRegistry {
         return html
     }
 
-    private static func stepStyle(for status: String) -> (String, String, String) {
+    private static func stepStyle(for status: String) -> (dotStyle: String, textColor: String) {
         switch status.lowercased() {
         case "done", "complete", "completed", "passed", "pass", "success":
-            return ("#50fa7b", "background:#50fa7b;box-shadow:0 0 6px #50fa7b", "#50fa7b")
+            return ("background:#50fa7b;box-shadow:0 0 6px #50fa7b", "#50fa7b")
         case "running", "active", "in-progress", "in_progress":
-            return ("#8be9fd", "background:#8be9fd;box-shadow:0 0 6px #8be9fd", "#8be9fd")
+            return ("background:#8be9fd;box-shadow:0 0 6px #8be9fd", "#8be9fd")
         case "failed", "fail", "error":
-            return ("#ff5555", "background:#ff5555;box-shadow:0 0 6px #ff5555", "#ff5555")
+            return ("background:#ff5555;box-shadow:0 0 6px #ff5555", "#ff5555")
         case "skipped", "skip":
-            return ("#6272a4", "background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.2)", "rgba(255,255,255,0.4)")
+            return ("background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.2)", "rgba(255,255,255,0.4)")
         default: // pending
-            return ("#6272a4", "background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.2)", "rgba(255,255,255,0.4)")
+            return ("background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.2)", "rgba(255,255,255,0.4)")
         }
     }
 
@@ -356,6 +382,9 @@ enum WidgetTemplateRegistry {
         let maxVal = numericValues.max() ?? 1
         let normalizer = maxVal > 0 ? maxVal : 1
 
+        // Unique prefix per render to avoid SVG gradient ID collisions across widgets
+        let uid = String(UUID().uuidString.prefix(8))
+
         let svgWidth = 380
         let barAreaHeight = 70
         let svgHeight = 110
@@ -370,7 +399,7 @@ enum WidgetTemplateRegistry {
         for i in 0..<count {
             let c = color(at: i)
             svg += """
-              <linearGradient id="tbar\(i)" x1="0" y1="0" x2="0" y2="1">
+              <linearGradient id="tbar\(uid)\(i)" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stop-color="\(c)"/>
                 <stop offset="100%" stop-color="\(c)" stop-opacity="0.5"/>
               </linearGradient>
@@ -387,7 +416,7 @@ enum WidgetTemplateRegistry {
             let cx = x + barWidth / 2
             let c = color(at: i)
 
-            svg += "<rect x=\"\(x)\" y=\"\(y)\" width=\"\(barWidth)\" height=\"\(barHeight)\" rx=\"4\" fill=\"url(#tbar\(i))\"/>\n"
+            svg += "<rect x=\"\(x)\" y=\"\(y)\" width=\"\(barWidth)\" height=\"\(barHeight)\" rx=\"4\" fill=\"url(#tbar\(uid)\(i))\"/>\n"
             svg += "<text x=\"\(cx)\" y=\"\(y - 5)\" text-anchor=\"middle\" fill=\"\(c)\" font-size=\"10\" font-family=\"SF Mono,monospace\">\(esc(valueStrs[i].trimmingCharacters(in: .whitespaces)))</text>\n"
             svg += "<text x=\"\(cx)\" y=\"\(barAreaHeight + 20)\" text-anchor=\"middle\" fill=\"\(mutedText)\" font-size=\"9\" font-family=\"-apple-system,sans-serif\">\(esc(labels[i].trimmingCharacters(in: .whitespaces)))</text>\n"
         }
