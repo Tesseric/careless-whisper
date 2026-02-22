@@ -19,10 +19,11 @@ struct SettingsView: View {
                 optionsSection
                 agentIntegrationSection
                 permissionsSection
+                versionFooter
             }
             .padding(20)
         }
-        .frame(width: 420, height: 480)
+        .frame(width: 420, height: 560)
     }
 
     // MARK: - Hotkey
@@ -211,26 +212,58 @@ struct SettingsView: View {
             Label("Permissions", systemImage: "lock.shield")
                 .font(.headline)
 
-            HStack {
-                Image(systemName: "mic.fill").frame(width: 20)
-                Text("Microphone")
-                Spacer()
-                Image(systemName: appState.permissionChecker.hasMicrophonePermission ? "checkmark.circle.fill" : "xmark.circle.fill")
-                    .foregroundStyle(appState.permissionChecker.hasMicrophonePermission ? .green : .red)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Image(systemName: "mic.fill").frame(width: 20)
+                    Text("Microphone")
+                    Spacer()
+                    Image(systemName: appState.permissionChecker.hasMicrophonePermission ? "checkmark.circle.fill" : "xmark.circle.fill")
+                        .foregroundStyle(appState.permissionChecker.hasMicrophonePermission ? .green : .red)
+                }
+                Text("Required to capture speech for transcription")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 28)
             }
 
-            HStack {
-                Image(systemName: "accessibility").frame(width: 20)
-                Text("Accessibility")
-                Spacer()
-                Image(systemName: appState.permissionChecker.hasAccessibilityPermission ? "checkmark.circle.fill" : "xmark.circle.fill")
-                    .foregroundStyle(appState.permissionChecker.hasAccessibilityPermission ? .green : .red)
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Image(systemName: "accessibility").frame(width: 20)
+                    Text("Accessibility")
+                    Spacer()
+                    Image(systemName: appState.permissionChecker.hasAccessibilityPermission ? "checkmark.circle.fill" : "xmark.circle.fill")
+                        .foregroundStyle(appState.permissionChecker.hasAccessibilityPermission ? .green : .red)
+                }
+                Text("Enables typing text directly at the cursor. Falls back to clipboard paste if not granted.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 28)
             }
 
             Button("Open System Settings") {
                 NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy")!)
             }
             .controlSize(.small)
+        }
+    }
+
+    private var versionFooter: some View {
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
+        return VStack(spacing: 4) {
+            Divider()
+            HStack {
+                Text("Careless Whisper v\(version)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Report Issue") {
+                    if let url = URL(string: "https://github.com/Tesseric/careless-whisper/issues/new/choose") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+                .font(.caption)
+                .buttonStyle(.link)
+            }
         }
     }
 

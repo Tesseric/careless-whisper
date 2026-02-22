@@ -6,6 +6,13 @@
 brew install --cask tesseric/careless-whisper/careless-whisper
 ```
 
+### Quick Start
+
+1. Install via `brew install --cask tesseric/careless-whisper/careless-whisper`
+2. Launch — a mic icon appears in your menu bar
+3. Grant Microphone and Accessibility permissions when prompted
+4. Hold `Option+`` ` and speak — text appears at your cursor
+
 A macOS menu bar app for **push-to-talk voice-to-text** built for developers who live in the terminal. Speak naturally to type into your editor, terminal, or SWE agent — transcribed locally via Whisper with zero cloud dependencies.
 
 When you're pair-programming with an AI agent and your hands are on the keyboard, Careless Whisper gives you a voice channel to your tools. Hold a hotkey, speak, release — your words appear exactly where your cursor is.
@@ -17,6 +24,14 @@ When you're pair-programming with an AI agent and your hands are on the keyboard
 1. **Hold a hotkey** (default: `Option+`\`) → the mic starts recording and a floating HUD overlay appears
 2. **Speak** → Voice Activity Detection (VAD) splits speech into chunks, each transcribed in real-time via [whisper.cpp](https://github.com/ggerganov/whisper.cpp)
 3. **Release the hotkey** → the final transcription is assembled and automatically typed into the frontmost app
+
+## Privacy
+
+- **100% local** — all audio is processed on-device via whisper.cpp. No data ever leaves your Mac.
+- **No network required** after the initial one-time model download
+- **No analytics, telemetry, or accounts** — zero tracking of any kind
+- **Localhost only** — the overlay server binds to `127.0.0.1` and uses a random auth token per session
+- **Open source** — audit the code yourself
 
 ## Terminal-Aware Dev Dashboard
 
