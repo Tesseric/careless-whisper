@@ -70,24 +70,35 @@ AI agents like [Claude Code](https://docs.anthropic.com/en/docs/claude-code) can
 
 When agent widgets are visible and you start recording, the overlay expands into a **dual-column layout** — your git context on one side, agent widgets on the other — giving you a complete picture of what both you and your agent are doing.
 
-### What agents can display
+### Pre-built widget templates
 
-- Build status and test results
-- Progress indicators and dashboards
-- SVG charts and visualizations
-- Any HTML/CSS/JS content
+Agents can create common widgets without composing any HTML. Set a `template` name and `params` — the server generates styled, Dracula-themed HTML automatically:
 
-### Parameterized widgets
+| Template | Purpose | Example params |
+|---|---|---|
+| `progress` | Progress bar with label | `label`, `pct`, `status` |
+| `steps` | Vertical pipeline/timeline | `labels`, `statuses`, `details` |
+| `metrics` | Grid of metric cards | `values`, `labels` |
+| `table` | Data table | `headers`, `rows` |
+| `status-list` | Items with status badges | `labels`, `statuses` |
+| `message` | Notification card | `text`, `type`, `detail` |
+| `key-value` | Key-value pairs | `keys`, `values` |
+| `bar-chart` | SVG bar chart | `labels`, `values` |
 
-Widgets support a `params` dictionary with `{{key}}` template placeholders in HTML. Agents can update individual parameter values live via the `set-params` command — the overlay updates in-place via JavaScript injection with no flicker or full page reload, so CSS transitions animate smoothly.
+Templates and raw HTML widgets can be mixed in the same display. Custom HTML/CSS/SVG remains available for specialized visualizations (sparklines, radar charts, heatmaps, etc.).
+
+### Custom widgets
+
+For visualizations that templates can't express, agents send raw HTML directly. Widgets support a `params` dictionary with `{{key}}` template placeholders. Agents can update individual parameter values live via `set-params` — the overlay updates in-place via JavaScript injection with no flicker, so CSS transitions animate smoothly.
 
 ### How it works
 
 1. Enable **Agent Integration** in Settings
 2. A local HTTP server starts on `127.0.0.1` with bearer token auth
 3. A Claude Code skill is auto-installed to `~/.claude/skills/overlay/`
-4. Agents use the `overlay-cli` script to show, update, set-params, and dismiss widgets
-5. Run `~/.claude/skills/overlay/demo.sh` to see all visualization types in action
+4. The skill auto-updates on app launch when new templates or docs are available
+5. Agents use the `overlay-cli` script to show, update, set-params, and dismiss widgets
+6. Run `~/.claude/skills/overlay/demo.sh` to see all visualization types in action
 
 The server binds to localhost only, uses a random auth token per session, and the discovery file (`~/.careless-whisper/server.json`) is restricted to owner-only permissions. Stale temp files from previous sessions are cleaned up automatically on server start.
 
@@ -172,7 +183,8 @@ CarelessWhisperApp (entry point)
 │   ├── HTTPConnection       — single-connection HTTP/1.1 request parser + response writer
 │   ├── HTMLComposer         — widget HTML composition, sanitization, and CSP
 │   ├── WidgetModels         — Codable widget/request/response types
-│   └── AgentSkillInstaller  — auto-installs Claude Code skill + CLI to ~/.claude/
+│   ├── WidgetTemplateRegistry — 8 pre-built widget templates (progress, steps, metrics, etc.)
+│   └── AgentSkillInstaller  — auto-installs Claude Code skill + CLI with content-hash versioning
 │
 ├── Clipboard/
 │   └── ClipboardImageService — detect, save, and auto-prune clipboard images

@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import os
 
 enum AgentSkillInstaller {
@@ -23,8 +24,37 @@ enum AgentSkillInstaller {
         skillDirectoryURL.appendingPathComponent("demo.sh")
     }
 
+    private static var versionFileURL: URL {
+        skillDirectoryURL.appendingPathComponent(".version")
+    }
+
     static var isInstalled: Bool {
         FileManager.default.fileExists(atPath: skillFileURL.path)
+    }
+
+    /// SHA-256 hash (first 16 hex chars) of all skill content, used to detect when files need updating.
+    static var contentHash: String {
+        let combined = skillContent + cliScriptContent + demoScriptContent
+        let hash = SHA256.hash(data: Data(combined.utf8))
+        return hash.prefix(8).map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Whether the installed skill files match the current app version.
+    static var isUpToDate: Bool {
+        guard isInstalled,
+              let installed = try? String(contentsOf: versionFileURL, encoding: .utf8) else {
+            return false
+        }
+        return installed.trimmingCharacters(in: .whitespacesAndNewlines) == contentHash
+    }
+
+    /// Installs the skill only if it's missing or outdated.
+    static func installIfNeeded() {
+        guard !isUpToDate else {
+            logger.info("Claude Code skill is up to date (\(contentHash))")
+            return
+        }
+        install()
     }
 
     static func install() {
@@ -34,6 +64,7 @@ enum AgentSkillInstaller {
             try skillContent.write(to: skillFileURL, atomically: true, encoding: .utf8)
             try cliScriptContent.write(to: cliScriptURL, atomically: true, encoding: .utf8)
             try demoScriptContent.write(to: demoScriptURL, atomically: true, encoding: .utf8)
+            try contentHash.write(to: versionFileURL, atomically: true, encoding: .utf8)
             // Make scripts executable
             try FileManager.default.setAttributes(
                 [.posixPermissions: 0o755],
@@ -43,7 +74,7 @@ enum AgentSkillInstaller {
                 [.posixPermissions: 0o755],
                 ofItemAtPath: demoScriptURL.path
             )
-            logger.info("Installed Claude Code skill at \(skillFileURL.path)")
+            logger.info("Installed Claude Code skill at \(skillFileURL.path) (version \(contentHash))")
         } catch {
             logger.error("Failed to install skill: \(error)")
         }
@@ -118,14 +149,89 @@ enum AgentSkillInstaller {
       "title": "Optional Title",
       "html": "<p>Any HTML content</p>",
       "priority": 0,
-      "params": {"key": "value"}
+      "params": {"key": "value"},
+      "template": "progress"
     }
     ```
     - `id`: Unique identifier. Namespace by agent (e.g., `claude:build`).
     - `title`: Optional header displayed above content.
-    - `html`: HTML rendered in the overlay. Supports inline CSS and JS. Tags like `<iframe>`, `<object>`, `<embed>`, `<form>` are stripped.
+    - `html`: HTML rendered in the overlay. Supports inline CSS and JS. Tags like `<iframe>`, `<object>`, `<embed>`, `<form>` are stripped. Not needed when using `template`.
     - `priority`: Sort order (lower = higher). Default 0.
-    - `params`: Optional dictionary of named parameters. Values are substituted into `{{key}}` placeholders in the HTML template and can be updated live via `set-params`.
+    - `params`: Optional dictionary of named parameters. Values are substituted into `{{key}}` placeholders in the HTML template and can be updated live via `set-params`. Required when using `template`.
+    - `template`: Optional template name. When set, the server generates the HTML from the template + params automatically. See "Pre-Built Templates" below.
+
+    ### Pre-Built Templates
+
+    Templates let you create rich widgets without writing HTML. Set `template` and `params` — the server generates the HTML. Live updates via `set-params` work just like raw HTML widgets.
+
+    **Quick start — template vs raw HTML:**
+    ```json
+    // With template (compact):
+    {"id":"claude:build","template":"progress","params":{"label":"Building","pct":"45%","status":"Compiling..."}}
+
+    // Equivalent raw HTML (verbose):
+    {"id":"claude:build","html":"<div style='...'><div style='width:45%;...'></div></div><p>Compiling...</p>","params":{"pct":"45%","status":"Compiling..."}}
+    ```
+
+    **Available templates:**
+
+    #### `progress` — Progress bar with label
+    Required params: `label`, `pct`, `status`
+    All params are live-updatable via `set-params`.
+    ```json
+    {"id":"claude:build","template":"progress","title":"Build","params":{"label":"Compiling","pct":"60%","status":"Building module 3/5..."}}
+    ```
+
+    #### `steps` — Vertical pipeline/timeline
+    Required params: `labels` (pipe-delimited), `statuses` (pipe-delimited: done/running/failed/pending/skipped)
+    Optional: `details` (pipe-delimited). `statuses` and `details` are live-updatable.
+    ```json
+    {"id":"claude:pipeline","template":"steps","title":"Deploy","params":{"labels":"Build|Test|Package|Deploy","statuses":"done|done|running|pending","details":"1m 12s|247 passed|bundling...|"}}
+    ```
+
+    #### `metrics` — Grid of metric cards
+    Required params: `values` (pipe-delimited), `labels` (pipe-delimited)
+    `values` are live-updatable.
+    ```json
+    {"id":"claude:stats","template":"metrics","title":"Dashboard","params":{"values":"98%|1.2s|247|0","labels":"Tests Pass|Build Time|Commits|Failures"}}
+    ```
+
+    #### `table` — Data table
+    Required params: `headers` (pipe-delimited), `rows` (pipe-delimited rows, comma-separated cells)
+    Use `update` to replace the whole widget for new data.
+    ```json
+    {"id":"claude:deps","template":"table","title":"Dependencies","params":{"headers":"Package|Version|Status","rows":"SwiftWhisper,1.2.0,ok|HotKey,0.2.0,ok|Alamofire,5.9.0,outdated"}}
+    ```
+
+    #### `status-list` — Items with status badges
+    Required params: `labels` (pipe-delimited), `statuses` (pipe-delimited: ok/running/warning/fail/skip)
+    Optional: `details` (pipe-delimited). `statuses` and `details` are live-updatable.
+    ```json
+    {"id":"claude:checks","template":"status-list","title":"Checks","params":{"labels":"Lint|Types|Tests|Coverage","statuses":"ok|ok|running|pending","details":"No issues|0 errors|43/100|"}}
+    ```
+
+    #### `message` — Notification card
+    Required params: `text`, `type` (info/success/warning/error)
+    Optional: `detail`. `text` and `detail` are live-updatable.
+    ```json
+    {"id":"claude:msg","template":"message","params":{"text":"Build succeeded","type":"success","detail":"247 tests passed in 1.2s"}}
+    ```
+
+    #### `key-value` — Key-value pairs
+    Required params: `keys` (pipe-delimited), `values` (pipe-delimited)
+    Use `update` to replace the whole widget for new data.
+    ```json
+    {"id":"claude:info","template":"key-value","title":"Project","params":{"keys":"Branch|Commit|Swift|Platform","values":"main|a1b2c3d|5.9|macOS 14+"}}
+    ```
+
+    #### `bar-chart` — SVG bar chart
+    Required params: `labels` (pipe-delimited), `values` (pipe-delimited numbers)
+    Use `update` to replace the whole widget for new data.
+    ```json
+    {"id":"claude:perf","template":"bar-chart","title":"Test Duration (ms)","params":{"labels":"Audio|Transcription|Injection|Git|Server","values":"548|351|698|249|451"}}
+    ```
+
+    **Delimiter convention:** List params use `|` as delimiter (e.g., `"Build|Test|Deploy"`). Table rows use `|` between rows and `,` between cells within a row.
 
     ### Parameterized Widgets
 
@@ -179,6 +285,7 @@ enum AgentSkillInstaller {
 
     ### Guidelines
 
+    - **Prefer templates over raw HTML.** If a pre-built template fits your use case, always use it — it's faster, uses fewer tokens, and produces consistent styling. Only fall back to raw `html` for visualizations templates can't express (e.g., sparklines, radar charts, heatmaps, custom SVG, image swatches). You can mix both in the same `show` request — some widgets using templates and others using raw HTML.
     - Use the overlay to show progress, status, or visualizations — not for critical information the user must read before continuing.
     - Keep widgets concise. The overlay is ~420px wide.
     - Prefer `set-params` over `update` when only values change — it's faster and flicker-free.
@@ -271,10 +378,10 @@ enum AgentSkillInstaller {
 
     private static let demoScriptContent = """
     #!/bin/bash
-    # Careless Whisper overlay demo — cycles through 8 visualization types.
+    # Careless Whisper overlay demo — cycles through visualization types.
     # Usage: demo.sh [--delay N] [demo-name]
     #   --delay N   Seconds between demos (default: 3)
-    #   demo-name   Run only the named demo (progress|metrics|sparkline|equalizer|timeline|heatmap|multi|barchart)
+    #   demo-name   Run only the named demo (progress|metrics|sparkline|equalizer|timeline|heatmap|multi|barchart|t-progress|t-steps|t-metrics|t-status-list|t-message|t-table|t-key-value|t-bar-chart)
     set -euo pipefail
 
     CLI="$HOME/.claude/skills/overlay/overlay-cli"
@@ -369,6 +476,72 @@ enum AgentSkillInstaller {
     run_demo barchart
     if [[ -z "$ONLY" || "$ONLY" == "barchart" ]]; then
       show_json '{"widgets":[{"id":"demo:bars","title":"Test Duration by Module (ms)","priority":0,"html":"<svg width=\\\"100%\\\" height=\\\"110\\\" viewBox=\\\"0 0 380 110\\\"><defs><linearGradient id=\\\"b1\\\" x1=\\\"0\\\" y1=\\\"0\\\" x2=\\\"0\\\" y2=\\\"1\\\"><stop offset=\\\"0%\\\" stop-color=\\\"#8be9fd\\\"/><stop offset=\\\"100%\\\" stop-color=\\\"#8be9fd\\\" stop-opacity=\\\"0.5\\\"/></linearGradient><linearGradient id=\\\"b2\\\" x1=\\\"0\\\" y1=\\\"0\\\" x2=\\\"0\\\" y2=\\\"1\\\"><stop offset=\\\"0%\\\" stop-color=\\\"#50fa7b\\\"/><stop offset=\\\"100%\\\" stop-color=\\\"#50fa7b\\\" stop-opacity=\\\"0.5\\\"/></linearGradient><linearGradient id=\\\"b3\\\" x1=\\\"0\\\" y1=\\\"0\\\" x2=\\\"0\\\" y2=\\\"1\\\"><stop offset=\\\"0%\\\" stop-color=\\\"#bd93f9\\\"/><stop offset=\\\"100%\\\" stop-color=\\\"#bd93f9\\\" stop-opacity=\\\"0.5\\\"/></linearGradient><linearGradient id=\\\"b4\\\" x1=\\\"0\\\" y1=\\\"0\\\" x2=\\\"0\\\" y2=\\\"1\\\"><stop offset=\\\"0%\\\" stop-color=\\\"#ffb86c\\\"/><stop offset=\\\"100%\\\" stop-color=\\\"#ffb86c\\\" stop-opacity=\\\"0.5\\\"/></linearGradient><linearGradient id=\\\"b5\\\" x1=\\\"0\\\" y1=\\\"0\\\" x2=\\\"0\\\" y2=\\\"1\\\"><stop offset=\\\"0%\\\" stop-color=\\\"#ff79c6\\\"/><stop offset=\\\"100%\\\" stop-color=\\\"#ff79c6\\\" stop-opacity=\\\"0.5\\\"/></linearGradient></defs><line x1=\\\"0\\\" y1=\\\"85\\\" x2=\\\"380\\\" y2=\\\"85\\\" stroke=\\\"rgba(255,255,255,0.1)\\\" stroke-width=\\\"1\\\"/><rect x=\\\"10\\\" y=\\\"30\\\" width=\\\"52\\\" height=\\\"55\\\" rx=\\\"4\\\" fill=\\\"url(#b1)\\\"/><rect x=\\\"82\\\" y=\\\"50\\\" width=\\\"52\\\" height=\\\"35\\\" rx=\\\"4\\\" fill=\\\"url(#b2)\\\"/><rect x=\\\"154\\\" y=\\\"15\\\" width=\\\"52\\\" height=\\\"70\\\" rx=\\\"4\\\" fill=\\\"url(#b3)\\\"/><rect x=\\\"226\\\" y=\\\"60\\\" width=\\\"52\\\" height=\\\"25\\\" rx=\\\"4\\\" fill=\\\"url(#b4)\\\"/><rect x=\\\"298\\\" y=\\\"40\\\" width=\\\"52\\\" height=\\\"45\\\" rx=\\\"4\\\" fill=\\\"url(#b5)\\\"/><text x=\\\"36\\\" y=\\\"25\\\" text-anchor=\\\"middle\\\" fill=\\\"#8be9fd\\\" font-size=\\\"10\\\" font-family=\\\"SF Mono,monospace\\\">548</text><text x=\\\"108\\\" y=\\\"45\\\" text-anchor=\\\"middle\\\" fill=\\\"#50fa7b\\\" font-size=\\\"10\\\" font-family=\\\"SF Mono,monospace\\\">351</text><text x=\\\"180\\\" y=\\\"10\\\" text-anchor=\\\"middle\\\" fill=\\\"#bd93f9\\\" font-size=\\\"10\\\" font-family=\\\"SF Mono,monospace\\\">698</text><text x=\\\"252\\\" y=\\\"55\\\" text-anchor=\\\"middle\\\" fill=\\\"#ffb86c\\\" font-size=\\\"10\\\" font-family=\\\"SF Mono,monospace\\\">249</text><text x=\\\"324\\\" y=\\\"35\\\" text-anchor=\\\"middle\\\" fill=\\\"#ff79c6\\\" font-size=\\\"10\\\" font-family=\\\"SF Mono,monospace\\\">451</text><text x=\\\"36\\\" y=\\\"98\\\" text-anchor=\\\"middle\\\" fill=\\\"#6272a4\\\" font-size=\\\"9\\\" font-family=\\\"-apple-system,sans-serif\\\">Audio</text><text x=\\\"108\\\" y=\\\"98\\\" text-anchor=\\\"middle\\\" fill=\\\"#6272a4\\\" font-size=\\\"9\\\" font-family=\\\"-apple-system,sans-serif\\\">Transc.</text><text x=\\\"180\\\" y=\\\"98\\\" text-anchor=\\\"middle\\\" fill=\\\"#6272a4\\\" font-size=\\\"9\\\" font-family=\\\"-apple-system,sans-serif\\\">Inject</text><text x=\\\"252\\\" y=\\\"98\\\" text-anchor=\\\"middle\\\" fill=\\\"#6272a4\\\" font-size=\\\"9\\\" font-family=\\\"-apple-system,sans-serif\\\">Git</text><text x=\\\"324\\\" y=\\\"98\\\" text-anchor=\\\"middle\\\" fill=\\\"#6272a4\\\" font-size=\\\"9\\\" font-family=\\\"-apple-system,sans-serif\\\">Server</text></svg>"}]}'
+      sleep "$DELAY"
+    fi
+
+    # ========================================
+    # Template-based demos
+    # ========================================
+
+    # --- 9. t-progress (template) ---
+    run_demo t-progress
+    if [[ -z "$ONLY" || "$ONLY" == "t-progress" ]]; then
+      show_json '{"widgets":[{"id":"demo:t-progress","title":"Template: Progress","template":"progress","params":{"label":"Compiling modules","pct":"0%","status":"Starting build…"}}]}'
+      sleep 0.8
+      set_params '{"id":"demo:t-progress","params":{"label":"Compiling modules","pct":"40%","status":"Resolving dependencies…"}}'
+      sleep 0.8
+      set_params '{"id":"demo:t-progress","params":{"label":"Compiling modules","pct":"80%","status":"Linking…"}}'
+      sleep 0.8
+      set_params '{"id":"demo:t-progress","params":{"label":"Compiling modules","pct":"100%","status":"✓ Build complete"}}'
+      sleep "$DELAY"
+    fi
+
+    # --- 10. t-steps (template) ---
+    run_demo t-steps
+    if [[ -z "$ONLY" || "$ONLY" == "t-steps" ]]; then
+      show_json '{"widgets":[{"id":"demo:t-steps","title":"Template: Steps","template":"steps","params":{"labels":"Build|Test|Package|Deploy","statuses":"done|done|running|pending","details":"1m 12s|247 passed|bundling…|"}}]}'
+      sleep "$DELAY"
+    fi
+
+    # --- 11. t-metrics (template) ---
+    run_demo t-metrics
+    if [[ -z "$ONLY" || "$ONLY" == "t-metrics" ]]; then
+      show_json '{"widgets":[{"id":"demo:t-metrics","title":"Template: Metrics","template":"metrics","params":{"values":"98%|1.2s|247|3|0","labels":"Tests Pass|Build Time|Commits|Open PRs|Failures"}}]}'
+      sleep "$DELAY"
+    fi
+
+    # --- 12. t-status-list (template) ---
+    run_demo t-status-list
+    if [[ -z "$ONLY" || "$ONLY" == "t-status-list" ]]; then
+      show_json '{"widgets":[{"id":"demo:t-status","title":"Template: Status List","template":"status-list","params":{"labels":"Lint|Types|Tests|Coverage","statuses":"ok|ok|running|pending","details":"No issues|0 errors|43/100|"}}]}'
+      sleep "$DELAY"
+    fi
+
+    # --- 13. t-message (template) ---
+    run_demo t-message
+    if [[ -z "$ONLY" || "$ONLY" == "t-message" ]]; then
+      show_json '{"widgets":[{"id":"demo:t-msg","template":"message","params":{"text":"Build succeeded","type":"success","detail":"247 tests passed in 1.2s"}}]}'
+      sleep "$DELAY"
+    fi
+
+    # --- 14. t-table (template) ---
+    run_demo t-table
+    if [[ -z "$ONLY" || "$ONLY" == "t-table" ]]; then
+      show_json '{"widgets":[{"id":"demo:t-table","title":"Template: Table","template":"table","params":{"headers":"Package|Version|Status","rows":"SwiftWhisper,1.2.0,ok|HotKey,0.2.0,ok|Alamofire,5.9.0,outdated"}}]}'
+      sleep "$DELAY"
+    fi
+
+    # --- 15. t-key-value (template) ---
+    run_demo t-key-value
+    if [[ -z "$ONLY" || "$ONLY" == "t-key-value" ]]; then
+      show_json '{"widgets":[{"id":"demo:t-kv","title":"Template: Key-Value","template":"key-value","params":{"keys":"Branch|Commit|Swift|Platform","values":"main|a1b2c3d|5.9|macOS 14+"}}]}'
+      sleep "$DELAY"
+    fi
+
+    # --- 16. t-bar-chart (template) ---
+    run_demo t-bar-chart
+    if [[ -z "$ONLY" || "$ONLY" == "t-bar-chart" ]]; then
+      show_json '{"widgets":[{"id":"demo:t-bars","title":"Template: Bar Chart","template":"bar-chart","params":{"labels":"Audio|Transc.|Inject|Git|Server","values":"548|351|698|249|451"}}]}'
       sleep "$DELAY"
     fi
 

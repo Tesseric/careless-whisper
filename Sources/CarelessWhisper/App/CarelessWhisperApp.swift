@@ -28,7 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             await appState.setup()
             if appState.agentOverlayEnabled {
                 appState.startOverlayServer()
-                AgentSkillInstaller.install()
+                AgentSkillInstaller.installIfNeeded()
             }
         }
     }

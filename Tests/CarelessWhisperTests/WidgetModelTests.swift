@@ -121,6 +121,53 @@ final class WidgetModelTests: XCTestCase {
         XCTAssertEqual(request.params["pct"], "75")
     }
 
+    // MARK: - Template Field
+
+    func testAgentWidgetWithTemplate() throws {
+        let json = """
+        {"id":"t1","template":"progress","params":{"label":"Build","pct":"50%","status":"Building..."}}
+        """
+        let widget = try JSONDecoder().decode(AgentWidget.self, from: Data(json.utf8))
+        XCTAssertEqual(widget.id, "t1")
+        XCTAssertEqual(widget.template, "progress")
+        XCTAssertEqual(widget.html, "") // defaults to empty when not provided
+        XCTAssertEqual(widget.params?["label"], "Build")
+    }
+
+    func testAgentWidgetWithoutTemplateBackcompat() throws {
+        let json = """
+        {"id":"x","html":"<b>bold</b>","priority":1}
+        """
+        let widget = try JSONDecoder().decode(AgentWidget.self, from: Data(json.utf8))
+        XCTAssertNil(widget.template)
+        XCTAssertEqual(widget.html, "<b>bold</b>")
+        XCTAssertEqual(widget.priority, 1)
+    }
+
+    func testAgentWidgetTemplateEncodeDecode() throws {
+        let widget = AgentWidget(
+            id: "t2",
+            title: "Build",
+            html: "<p>resolved</p>",
+            params: ["pct": "75%"],
+            template: "progress"
+        )
+        let data = try JSONEncoder().encode(widget)
+        let decoded = try JSONDecoder().decode(AgentWidget.self, from: data)
+        XCTAssertEqual(decoded.template, "progress")
+        XCTAssertEqual(decoded.html, "<p>resolved</p>")
+    }
+
+    func testAgentWidgetOmittedHtmlDefaultsToEmpty() throws {
+        let json = """
+        {"id":"no-html"}
+        """
+        let widget = try JSONDecoder().decode(AgentWidget.self, from: Data(json.utf8))
+        XCTAssertEqual(widget.html, "")
+        XCTAssertEqual(widget.priority, 0)
+        XCTAssertNil(widget.template)
+    }
+
     // MARK: - ServerInfo
 
     func testServerInfoEncodeDecode() throws {
