@@ -183,17 +183,14 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     }
 
     @objc private func reportIssue() {
-        if let url = URL(string: "https://github.com/Tesseric/careless-whisper/issues/new/choose") {
-            NSWorkspace.shared.open(url)
-        }
+        NSWorkspace.shared.open(AppConstants.issuesURL)
     }
 
     @objc private func showAbout() {
-        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
         NSApplication.shared.orderFrontStandardAboutPanel(options: [
-            .applicationVersion: version,
+            .applicationVersion: Bundle.main.appVersion,
             .credits: NSAttributedString(
-                string: "100% local voice-to-text for macOS\nhttps://github.com/Tesseric/careless-whisper",
+                string: "100% local voice-to-text for macOS\n\(AppConstants.repoURL.absoluteString)",
                 attributes: [.font: NSFont.systemFont(ofSize: 11)]
             ),
         ])

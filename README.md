@@ -11,7 +11,7 @@ brew install --cask tesseric/careless-whisper/careless-whisper
 1. Install via `brew install --cask tesseric/careless-whisper/careless-whisper`
 2. Launch — a mic icon appears in your menu bar
 3. Grant Microphone and Accessibility permissions when prompted
-4. Hold `Option+`` ` and speak — text appears at your cursor
+4. Hold <kbd>Option</kbd>+<kbd>`</kbd> and speak — text appears at your cursor
 
 A macOS menu bar app for **push-to-talk voice-to-text** built for developers who live in the terminal. Speak naturally to type into your editor, terminal, or SWE agent — transcribed locally via Whisper with zero cloud dependencies.
 

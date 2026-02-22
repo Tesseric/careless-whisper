@@ -248,18 +248,15 @@ struct SettingsView: View {
     }
 
     private var versionFooter: some View {
-        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
-        return VStack(spacing: 4) {
+        VStack(spacing: 4) {
             Divider()
             HStack {
-                Text("Careless Whisper v\(version)")
+                Text("Careless Whisper v\(Bundle.main.appVersion)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
                 Button("Report Issue") {
-                    if let url = URL(string: "https://github.com/Tesseric/careless-whisper/issues/new/choose") {
-                        NSWorkspace.shared.open(url)
-                    }
+                    NSWorkspace.shared.open(AppConstants.issuesURL)
                 }
                 .font(.caption)
                 .buttonStyle(.link)
