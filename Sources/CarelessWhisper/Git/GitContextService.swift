@@ -102,17 +102,34 @@ final class GitContextService {
 
     /// Detects git repo/branch from the terminal's descendant processes (runs off main thread).
     static func detect(terminalPID: pid_t) async -> GitContext? {
+        await detect(terminalPID: terminalPID, terminalBundleID: nil)
+    }
+
+    /// Detects git repo/branch, using Kitty IPC for focused-window CWD when applicable.
+    static func detect(terminalPID: pid_t, terminalBundleID: String?) async -> GitContext? {
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
-                continuation.resume(returning: detectSync(terminalPID: terminalPID))
+                continuation.resume(returning: detectSync(terminalPID: terminalPID, terminalBundleID: terminalBundleID))
             }
         }
     }
 
     // MARK: - Private
 
-    private static func detectSync(terminalPID: pid_t) -> GitContext? {
-        let cwds = findDescendantCWDs(rootPID: terminalPID)
+    private static func detectSync(terminalPID: pid_t, terminalBundleID: String? = nil) -> GitContext? {
+        let cwds: [String]
+        if terminalBundleID == "net.kovidgoyal.kitty" {
+            let kittyCWDs = detectKittyFocusedCWDs()
+            if !kittyCWDs.isEmpty {
+                logger.info("Using Kitty IPC focused CWDs: \(kittyCWDs, privacy: .public)")
+                cwds = kittyCWDs
+            } else {
+                logger.notice("Kitty IPC failed, falling back to process tree")
+                cwds = findDescendantCWDs(rootPID: terminalPID)
+            }
+        } else {
+            cwds = findDescendantCWDs(rootPID: terminalPID)
+        }
 
         for cwd in cwds {
             guard let repoRoot = git(["rev-parse", "--show-toplevel"], cwd: cwd) else { continue }
@@ -191,6 +208,107 @@ final class GitContextService {
             }
         }
         return cwds
+    }
+
+    // MARK: - Kitty IPC
+
+    /// Queries Kitty's window manager via `kitten @ ls` to find the active tab's CWDs.
+    ///
+    /// Returns CWDs from the foreground processes of the active window in the active tab.
+    /// The window-level `cwd` is the initial CWD from window creation and never updates,
+    /// so we must read from `foreground_processes[].cwd` for the actual shell directory.
+    /// Uses `is_active` rather than `is_focused` because Kitty reports `is_focused: false`
+    /// when another app (like our overlay) has focus, but `is_active` stays correct.
+    private static func detectKittyFocusedCWDs() -> [String] {
+        guard let kittenPath = findKittenBinary(),
+              let socketURL = findKittySocket() else { return [] }
+
+        guard let json = run(kittenPath, args: ["@", "--to", socketURL, "ls"], timeout: 3) else {
+            logger.notice("Kitty IPC: kitten @ ls returned nil")
+            return []
+        }
+
+        guard let data = json.data(using: .utf8),
+              let osWindows = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            logger.notice("Kitty IPC: failed to parse ls JSON")
+            return []
+        }
+
+        // Walk: OS window (is_active) → tab (is_active) → window (is_active)
+        // → foreground_processes[].cwd
+        for osWindow in osWindows {
+            guard osWindow["is_active"] as? Bool == true,
+                  let tabs = osWindow["tabs"] as? [[String: Any]] else { continue }
+            for tab in tabs {
+                guard tab["is_active"] as? Bool == true,
+                      let windows = tab["windows"] as? [[String: Any]] else { continue }
+                for window in windows {
+                    guard window["is_active"] as? Bool == true else { continue }
+
+                    var cwds: [String] = []
+                    var seen: Set<String> = []
+                    // Foreground process CWDs are the actual current directories
+                    if let fgProcesses = window["foreground_processes"] as? [[String: Any]] {
+                        for fg in fgProcesses {
+                            if let cwd = fg["cwd"] as? String, !cwd.isEmpty,
+                               seen.insert(cwd).inserted {
+                                cwds.append(cwd)
+                            }
+                        }
+                    }
+                    // Window-level CWD as last-resort fallback (stale but better than nothing)
+                    if let cwd = window["cwd"] as? String, !cwd.isEmpty,
+                       seen.insert(cwd).inserted {
+                        cwds.append(cwd)
+                    }
+                    if !cwds.isEmpty { return cwds }
+                }
+            }
+        }
+
+        logger.notice("Kitty IPC: no active window found in ls output")
+        return []
+    }
+
+    private static func findKittenBinary() -> String? {
+        let candidates = [
+            "/Applications/kitty.app/Contents/MacOS/kitten",
+            "/usr/local/bin/kitten",
+            "/opt/homebrew/bin/kitten",
+            NSHomeDirectory() + "/.local/bin/kitten",
+            NSHomeDirectory() + "/.local/kitty.app/bin/kitten",
+        ]
+        return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
+    }
+
+    private static func findKittySocket() -> String? {
+        if let listenOn = ProcessInfo.processInfo.environment["KITTY_LISTEN_ON"], !listenOn.isEmpty {
+            return listenOn
+        }
+
+        let fm = FileManager.default
+        guard let contents = try? fm.contentsOfDirectory(atPath: "/tmp") else { return nil }
+        let uid = getuid()
+
+        let sockets = contents
+            .filter { $0.hasPrefix("kitty-") }
+            .map { "/tmp/\($0)" }
+            .filter { path in
+                var isDir: ObjCBool = false
+                guard fm.fileExists(atPath: path, isDirectory: &isDir), !isDir.boolValue else { return false }
+                guard let attrs = try? fm.attributesOfItem(atPath: path),
+                      let ownerID = attrs[.ownerAccountID] as? UInt, ownerID == uid,
+                      let fileType = attrs[.type] as? FileAttributeType, fileType == .typeSocket else { return false }
+                return true
+            }
+            .sorted { a, b in
+                let aDate = (try? fm.attributesOfItem(atPath: a)[.modificationDate] as? Date) ?? .distantPast
+                let bDate = (try? fm.attributesOfItem(atPath: b)[.modificationDate] as? Date) ?? .distantPast
+                return aDate > bDate
+            }
+
+        guard let path = sockets.first else { return nil }
+        return "unix:\(path)"
     }
 
     /// Extracts "owner/repo" from a GitHub remote URL (SSH or HTTPS).

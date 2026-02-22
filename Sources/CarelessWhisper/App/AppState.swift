@@ -60,6 +60,7 @@ final class AppState: ObservableObject {
     private var isProcessingChunk = false
     private var gitPollingTimer: Timer?
     private var lastPolledTerminalPID: pid_t?
+    private var lastPolledTerminalBundleID: String?
     private var workspaceActivationObserver: Any?
     private var clipboardChangeCount: Int = 0
 
@@ -274,15 +275,19 @@ final class AppState: ObservableObject {
 
     private func pollGitContext() {
         let pid: pid_t
+        let bundleID: String?
         if let frontApp = NSWorkspace.shared.frontmostApplication,
-           let bundleID = frontApp.bundleIdentifier,
-           GitContextService.isTerminal(bundleID: bundleID) {
+           let frontBundleID = frontApp.bundleIdentifier,
+           GitContextService.isTerminal(bundleID: frontBundleID) {
             pid = frontApp.processIdentifier
+            bundleID = frontBundleID
             lastPolledTerminalPID = pid
+            lastPolledTerminalBundleID = bundleID
             logger.notice("Git poll: terminal frontmost (pid=\(pid))")
         } else if let lastPID = lastPolledTerminalPID {
             // Terminal not frontmost — reuse last known terminal PID to keep CI/PR fresh
             pid = lastPID
+            bundleID = lastPolledTerminalBundleID
             logger.notice("Git poll: reusing last terminal (pid=\(pid))")
         } else {
             logger.notice("Git poll: skipped, no terminal PID")
@@ -290,7 +295,7 @@ final class AppState: ObservableObject {
         }
 
         Task {
-            let context = await GitContextService.detect(terminalPID: pid)
+            let context = await GitContextService.detect(terminalPID: pid, terminalBundleID: bundleID)
             self.gitContext = context
         }
     }
@@ -368,15 +373,16 @@ final class AppState: ObservableObject {
         logger.info("Starting recording")
         targetBundleID = textInjector.captureFrontmostApp()
 
-        // Fetch git context on-demand if not already populated by background polling
-        if gitContext == nil {
-            if GitContextService.isTerminal(bundleID: targetBundleID),
-               let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier {
-                Task {
-                    let context = await GitContextService.detect(terminalPID: pid)
-                    if self.recordingState != .idle {
-                        self.gitContext = context
-                    }
+        // Always fetch fresh git context when recording starts.
+        // Background polling may have stale data (e.g. user switched Kitty tabs
+        // since last poll, which doesn't fire didActivateApplicationNotification).
+        if GitContextService.isTerminal(bundleID: targetBundleID),
+           let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier {
+            let bundleID = targetBundleID
+            Task {
+                let context = await GitContextService.detect(terminalPID: pid, terminalBundleID: bundleID)
+                if self.recordingState != .idle {
+                    self.gitContext = context
                 }
             }
         }
