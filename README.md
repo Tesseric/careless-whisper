@@ -10,7 +10,7 @@ A macOS menu bar app for **push-to-talk voice-to-text** built for developers who
 
 When you're pair-programming with an AI agent and your hands are on the keyboard, Careless Whisper gives you a voice channel to your tools. Hold a hotkey, speak, release — your words appear exactly where your cursor is.
 
-[![Careless Whisper demo](https://img.youtube.com/vi/eTeb47Qa5DE/maxresdefault.jpg)](https://youtu.be/eTeb47Qa5DE)
+[![Careless Whisper demo](assets/hero.png)](https://youtu.be/eTeb47Qa5DE)
 
 ## How It Works
 
