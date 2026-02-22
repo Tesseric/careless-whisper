@@ -121,7 +121,7 @@ final class GitContextService {
         if terminalBundleID == "net.kovidgoyal.kitty" {
             let kittyCWDs = detectKittyFocusedCWDs()
             if !kittyCWDs.isEmpty {
-                logger.info("Using Kitty IPC focused CWDs: \(kittyCWDs, privacy: .public)")
+                logger.info("Using Kitty IPC focused CWDs: \(kittyCWDs, privacy: .private)")
                 cwds = kittyCWDs
             } else {
                 logger.notice("Kitty IPC failed, falling back to process tree")
@@ -220,8 +220,8 @@ final class GitContextService {
     /// Uses `is_active` rather than `is_focused` because Kitty reports `is_focused: false`
     /// when another app (like our overlay) has focus, but `is_active` stays correct.
     private static func detectKittyFocusedCWDs() -> [String] {
-        guard let kittenPath = findKittenBinary(),
-              let socketURL = findKittySocket() else { return [] }
+        guard let kittenPath = KittyRemoteControl.findKittenBinary(),
+              let socketURL = KittyRemoteControl.findSocket() else { return [] }
 
         guard let json = run(kittenPath, args: ["@", "--to", socketURL, "ls"], timeout: 3) else {
             logger.notice("Kitty IPC: kitten @ ls returned nil")
@@ -268,47 +268,6 @@ final class GitContextService {
 
         logger.notice("Kitty IPC: no active window found in ls output")
         return []
-    }
-
-    private static func findKittenBinary() -> String? {
-        let candidates = [
-            "/Applications/kitty.app/Contents/MacOS/kitten",
-            "/usr/local/bin/kitten",
-            "/opt/homebrew/bin/kitten",
-            NSHomeDirectory() + "/.local/bin/kitten",
-            NSHomeDirectory() + "/.local/kitty.app/bin/kitten",
-        ]
-        return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
-    }
-
-    private static func findKittySocket() -> String? {
-        if let listenOn = ProcessInfo.processInfo.environment["KITTY_LISTEN_ON"], !listenOn.isEmpty {
-            return listenOn
-        }
-
-        let fm = FileManager.default
-        guard let contents = try? fm.contentsOfDirectory(atPath: "/tmp") else { return nil }
-        let uid = getuid()
-
-        let sockets = contents
-            .filter { $0.hasPrefix("kitty-") }
-            .map { "/tmp/\($0)" }
-            .filter { path in
-                var isDir: ObjCBool = false
-                guard fm.fileExists(atPath: path, isDirectory: &isDir), !isDir.boolValue else { return false }
-                guard let attrs = try? fm.attributesOfItem(atPath: path),
-                      let ownerID = attrs[.ownerAccountID] as? UInt, ownerID == uid,
-                      let fileType = attrs[.type] as? FileAttributeType, fileType == .typeSocket else { return false }
-                return true
-            }
-            .sorted { a, b in
-                let aDate = (try? fm.attributesOfItem(atPath: a)[.modificationDate] as? Date) ?? .distantPast
-                let bDate = (try? fm.attributesOfItem(atPath: b)[.modificationDate] as? Date) ?? .distantPast
-                return aDate > bDate
-            }
-
-        guard let path = sockets.first else { return nil }
-        return "unix:\(path)"
     }
 
     /// Extracts "owner/repo" from a GitHub remote URL (SSH or HTTPS).

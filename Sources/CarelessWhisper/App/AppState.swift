@@ -267,6 +267,7 @@ final class AppState: ObservableObject {
         gitPollingTimer?.invalidate()
         gitPollingTimer = nil
         lastPolledTerminalPID = nil
+        lastPolledTerminalBundleID = nil
         if let observer = workspaceActivationObserver {
             NSWorkspace.shared.notificationCenter.removeObserver(observer)
             workspaceActivationObserver = nil
