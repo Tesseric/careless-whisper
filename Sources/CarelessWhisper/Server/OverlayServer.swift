@@ -19,6 +19,7 @@ final class OverlayServer {
     /// Callback invoked on the main actor when widgets change. Set by AppState.
     var onSetWidgets: (([AgentWidget]) -> Void)?
     var onUpsertWidget: ((AgentWidget) -> Void)?
+    var onUpdateParams: ((String, [String: String]) -> Void)?
     var onRemoveWidget: ((String) -> Void)?
     var onClearWidgets: (() -> Void)?
 
@@ -27,6 +28,9 @@ final class OverlayServer {
     var getOverlayVisible: (() -> Bool)?
 
     func start() {
+        // Clean up any stale temp files from a previous session
+        removeTempFiles()
+
         do {
             let params = NWParameters.tcp
             params.requiredLocalEndpoint = NWEndpoint.hostPort(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: preferredPort)!)
@@ -93,6 +97,7 @@ final class OverlayServer {
         listener = nil
         activeConnections.removeAll()
         removePortFile()
+        removeTempFiles()
     }
 
     // MARK: - Routing
@@ -115,6 +120,13 @@ final class OverlayServer {
 
         case ("POST", "/overlay/update"):
             return await handleUpdate(request)
+
+        case ("POST", "/overlay/params"):
+            return await handleUpdateParams(id: nil, request)
+
+        case ("POST", let path) where path.hasPrefix("/overlay/params/"):
+            let id = String(path.dropFirst("/overlay/params/".count))
+            return await handleUpdateParams(id: id, request)
 
         case ("POST", "/overlay/dismiss"):
             return await handleDismiss()
@@ -156,6 +168,28 @@ final class OverlayServer {
 
         await MainActor.run {
             onUpsertWidget?(updateRequest.widget)
+        }
+
+        return await makeOverlayResponse()
+    }
+
+    private func handleUpdateParams(id: String?, _ request: HTTPRequest) async -> HTTPResponse {
+        guard let body = request.body else {
+            return HTTPResponse(status: 400, body: ["error": "Missing request body"])
+        }
+        guard let paramsRequest = try? JSONDecoder().decode(UpdateParamsRequest.self, from: body) else {
+            return HTTPResponse(status: 400, body: ["error": "Invalid JSON — expected {\"id\":\"...\",\"params\":{...}}"])
+        }
+
+        // ID from path takes precedence, then from body
+        let resolvedId = (id.flatMap { $0.isEmpty ? nil : $0 }) ?? paramsRequest.id
+        guard let widgetId = resolvedId, !widgetId.isEmpty else {
+            return HTTPResponse(status: 400, body: ["error": "Missing widget ID"])
+        }
+
+        let decodedId = widgetId.removingPercentEncoding ?? widgetId
+        await MainActor.run {
+            onUpdateParams?(decodedId, paramsRequest.params)
         }
 
         return await makeOverlayResponse()
@@ -219,5 +253,25 @@ final class OverlayServer {
     private func removePortFile() {
         try? FileManager.default.removeItem(at: Self.portFileURL)
         logger.info("Removed port file")
+    }
+
+    // MARK: - Temp file cleanup
+
+    /// Temp files the skill instructs agents to write for CLI commands.
+    private static let tempFiles = [
+        "/tmp/overlay-widgets.json",
+        "/tmp/overlay-widget.json",
+        "/tmp/overlay-params.json",
+    ]
+
+    /// Remove stale temp files left over from previous sessions.
+    func removeTempFiles() {
+        let fm = FileManager.default
+        for path in Self.tempFiles {
+            if fm.fileExists(atPath: path) {
+                try? fm.removeItem(atPath: path)
+                logger.info("Removed stale temp file: \(path)")
+            }
+        }
     }
 }

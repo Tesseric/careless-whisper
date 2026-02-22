@@ -17,7 +17,7 @@ swift test --filter CarelessWhisperTests.AudioBufferTests/testAppendAndFlush  # 
 
 ## Project Overview
 
-Careless Whisper is a macOS menu bar app for push-to-talk voice-to-text. Hold a hotkey, speak, release — transcription appears at the cursor. Transcription is fully local via whisper.cpp (no API keys). When recording from a terminal, a floating HUD shows a live git/CI dashboard.
+Careless Whisper is a macOS menu bar app for push-to-talk voice-to-text. Hold a hotkey, speak, release — transcription appears at the cursor. Transcription is fully local via whisper.cpp (no API keys). When recording from a terminal, a floating HUD shows a live git/CI dashboard. AI agents can push rich HTML widgets to the overlay, with support for parameterized templates that update live via JS injection.
 
 - **Swift 5.9+**, **macOS 14+**, built with **Swift Package Manager** (no Xcode project)
 - Bundle ID: `com.carelesswhisper.app`
@@ -42,7 +42,8 @@ Careless Whisper is a macOS menu bar app for push-to-talk voice-to-text. Hold a 
 - **Git/** — `GitContextService` detects terminal CWD via process tree + `lsof`, collects git status/diff/log, optionally queries `gh` CLI for CI/PR info. Displayed in the recording overlay HUD.
 - **HotKey/** — `HotKeyManager` registers global hotkeys (default: Option+\`). Key down starts recording, key up stops and transcribes.
 - **Permissions/** — Checks/requests microphone (`AVCaptureDevice`) and accessibility (`AXIsProcessTrusted`).
-- **UI/** — `StatusBarController` (NSMenu-based menu bar), `RecordingOverlayController` (floating `NSPanel` HUD, non-activating), `SettingsWindowController`/`SettingsView` (SwiftUI settings).
+- **Server/** — `OverlayServer` runs a localhost HTTP server (`NWListener`, bearer token auth) for agent widget CRUD. `HTMLComposer` handles widget HTML composition, `{{key}}` param substitution, CSS custom properties, sanitization, and CSP. `WidgetModels` defines `AgentWidget` (with optional `params`), request/response types. `AgentSkillInstaller` auto-installs the Claude Code skill and CLI to `~/.claude/skills/overlay/`.
+- **UI/** — `StatusBarController` (NSMenu-based menu bar), `RecordingOverlayController` (floating `NSPanel` HUD, non-activating), `SettingsWindowController`/`SettingsView` (SwiftUI settings). `WidgetWebViewBridge` enables live param updates via JS injection into the WKWebView without full HTML reload.
 
 ## Conventions
 

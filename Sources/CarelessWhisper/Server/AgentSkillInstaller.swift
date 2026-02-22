@@ -19,6 +19,10 @@ enum AgentSkillInstaller {
         skillDirectoryURL.appendingPathComponent("overlay-cli")
     }
 
+    private static var demoScriptURL: URL {
+        skillDirectoryURL.appendingPathComponent("demo.sh")
+    }
+
     static var isInstalled: Bool {
         FileManager.default.fileExists(atPath: skillFileURL.path)
     }
@@ -29,10 +33,15 @@ enum AgentSkillInstaller {
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             try skillContent.write(to: skillFileURL, atomically: true, encoding: .utf8)
             try cliScriptContent.write(to: cliScriptURL, atomically: true, encoding: .utf8)
-            // Make the CLI script executable
+            try demoScriptContent.write(to: demoScriptURL, atomically: true, encoding: .utf8)
+            // Make scripts executable
             try FileManager.default.setAttributes(
                 [.posixPermissions: 0o755],
                 ofItemAtPath: cliScriptURL.path
+            )
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o755],
+                ofItemAtPath: demoScriptURL.path
             )
             logger.info("Installed Claude Code skill at \(skillFileURL.path)")
         } catch {
@@ -82,6 +91,14 @@ enum AgentSkillInstaller {
     ~/.claude/skills/overlay/overlay-cli update /tmp/overlay-widget.json
     ```
 
+    **Update widget params** — update dynamic values without rewriting the whole widget:
+    Step 1: Use the Write tool to write `{"id":"widget-id","params":{"key":"value"}}` to `/tmp/overlay-params.json`
+    Step 2: Run the CLI:
+    ```bash
+    ~/.claude/skills/overlay/overlay-cli set-params /tmp/overlay-params.json
+    ```
+    This updates the widget's parameters in-place via JavaScript injection — no flicker. See "Parameterized Widgets" below.
+
     **Dismiss** — clear all widgets or remove one by ID:
     ```bash
     ~/.claude/skills/overlay/overlay-cli dismiss
@@ -100,13 +117,52 @@ enum AgentSkillInstaller {
       "id": "unique-id",
       "title": "Optional Title",
       "html": "<p>Any HTML content</p>",
-      "priority": 0
+      "priority": 0,
+      "params": {"key": "value"}
     }
     ```
     - `id`: Unique identifier. Namespace by agent (e.g., `claude:build`).
     - `title`: Optional header displayed above content.
     - `html`: HTML rendered in the overlay. Supports inline CSS and JS. Tags like `<iframe>`, `<object>`, `<embed>`, `<form>` are stripped.
     - `priority`: Sort order (lower = higher). Default 0.
+    - `params`: Optional dictionary of named parameters. Values are substituted into `{{key}}` placeholders in the HTML template and can be updated live via `set-params`.
+
+    ### Parameterized Widgets
+
+    Use `params` to create widgets with dynamic values that update without rewriting the full HTML.
+
+    **Step 1: Define a widget with `params` and template placeholders.**
+    Use `{{key}}` in the HTML for initial rendering. For values that will update live, also add `data-param="key"` on the element:
+
+    ```json
+    {
+      "id": "claude:build",
+      "title": "Build Progress",
+      "html": "<div style='overflow:hidden;border-radius:4px;background:rgba(255,255,255,0.1)'><div data-param='bar' style='width:{{pct}}%;height:20px;background:#50fa7b;transition:width 0.3s'></div></div><p data-param='status' style='text-align:center;margin-top:6px'>{{status}}</p>",
+      "params": {"pct": "0", "status": "Starting build...", "bar": ""}
+    }
+    ```
+
+    **Step 2: Update params later:**
+    Use the Write tool to write to `/tmp/overlay-params.json`, then run the CLI:
+    ```json
+    {"id": "claude:build", "params": {"pct": "50", "status": "Compiling..."}}
+    ```
+    ```bash
+    ~/.claude/skills/overlay/overlay-cli set-params /tmp/overlay-params.json
+    ```
+    The CLI command is always the same path, so it auto-approves after the first allow. Only the JSON file contents change (written with the Write tool, which needs no approval).
+
+    **How it works:**
+    - `{{key}}` placeholders in the `html` field are replaced with param values on initial render.
+    - `data-param="key"` elements have their text content updated live via JavaScript when `set-params` is called. This avoids a full page reload, so CSS transitions animate smoothly.
+    - CSS custom properties `var(--key)` are also set on each widget container, so you can use `style="width: var(--pct)"` for dynamic CSS values.
+
+    **Tips for parameterized widgets:**
+    - Use `data-param` on a `<span>` or `<p>` for text that changes (status messages, counts, labels).
+    - Use CSS `var(--key)` for styling values (widths, colors, opacity). Set the initial value via `{{key}}` in an inline style or rely on the CSS custom property.
+    - Add `transition` CSS properties so value changes animate smoothly (e.g., `transition: width 0.3s`).
+    - When `data-param` is used for an element whose width or style depends on the param value, set the style via CSS custom properties rather than the text content.
 
     ### Visualization Tips
 
@@ -125,8 +181,15 @@ enum AgentSkillInstaller {
 
     - Use the overlay to show progress, status, or visualizations — not for critical information the user must read before continuing.
     - Keep widgets concise. The overlay is ~420px wide.
-    - Dismiss widgets when they're no longer relevant.
+    - Prefer `set-params` over `update` when only values change — it's faster and flicker-free.
+    - **Dismiss before replacing:** When switching to a completely different visualization (e.g., from a build dashboard to a test report), always dismiss old widgets first (`overlay-cli dismiss`) before showing new ones. This prevents stale widgets from lingering if the new set uses different IDs.
+    - **Clean up when done:** When your task is finished and the overlay is no longer needed, dismiss all widgets. Don't leave widgets visible after the work they relate to is complete.
     - The overlay coexists with recording — if the user is recording, your widgets appear below the recording indicator.
+
+    ### Demo
+
+    Run `~/.claude/skills/overlay/demo.sh` to cycle through all visualization types.
+    Options: `--delay 5` for slower pacing, or `demo.sh sparkline` to show just one.
     """
 
     // MARK: - CLI Script
@@ -135,10 +198,11 @@ enum AgentSkillInstaller {
     #!/bin/bash
     # Careless Whisper overlay CLI — wraps the local HTTP API.
     # Usage: overlay-cli <command> [file|args]
-    #   show     [file.json]  — replace all widgets (file path or stdin)
-    #   update   [file.json]  — upsert one widget (file path or stdin)
-    #   dismiss  [widget-id]  — clear all or one widget
-    #   health                — check server status
+    #   show       [file.json]  — replace all widgets (file path or stdin)
+    #   update     [file.json]  — upsert one widget (file path or stdin)
+    #   set-params [file.json]  — update widget params (file path or stdin)
+    #   dismiss    [widget-id]  — clear all or one widget
+    #   health                  — check server status
     set -euo pipefail
 
     SERVER_JSON="$HOME/.careless-whisper/server.json"
@@ -181,6 +245,11 @@ enum AgentSkillInstaller {
         curl -sf --max-time 5 -X POST "$BASE/overlay/update" \\
           -H "$AUTH" -H "Content-Type: application/json" -d "@$INPUT"
         ;;
+      set-params)
+        INPUT="${1:--}"
+        curl -sf --max-time 5 -X POST "$BASE/overlay/params" \\
+          -H "$AUTH" -H "Content-Type: application/json" -d "@$INPUT"
+        ;;
       dismiss)
         if [ $# -gt 0 ]; then
           curl -sf --max-time 5 -X POST "$BASE/overlay/dismiss/$1" -H "$AUTH"
@@ -192,9 +261,117 @@ enum AgentSkillInstaller {
         curl -sf --max-time 5 "$BASE/health"
         ;;
       *)
-        echo "Usage: overlay-cli {show|update|dismiss|health}" >&2
+        echo "Usage: overlay-cli {show|update|set-params|dismiss|health}" >&2
         exit 1
         ;;
     esac
+    """
+
+    // MARK: - Demo Script
+
+    private static let demoScriptContent = """
+    #!/bin/bash
+    # Careless Whisper overlay demo — cycles through 8 visualization types.
+    # Usage: demo.sh [--delay N] [demo-name]
+    #   --delay N   Seconds between demos (default: 3)
+    #   demo-name   Run only the named demo (progress|metrics|sparkline|equalizer|timeline|heatmap|multi|barchart)
+    set -euo pipefail
+
+    CLI="$HOME/.claude/skills/overlay/overlay-cli"
+    TMP="/tmp/overlay-demo.json"
+    DELAY=3
+    ONLY=""
+
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --delay) DELAY="$2"; shift 2 ;;
+        --delay=*) DELAY="${1#*=}"; shift ;;
+        *) ONLY="$1"; shift ;;
+      esac
+    done
+
+    show_json() { printf '%s' "$1" > "$TMP"; "$CLI" show "$TMP"; }
+    set_params() { printf '%s' "$1" > "$TMP"; "$CLI" set-params "$TMP"; }
+
+    cleanup() { "$CLI" dismiss 2>/dev/null; rm -f "$TMP"; }
+    trap cleanup EXIT
+
+    # Health check
+    if ! "$CLI" health >/dev/null 2>&1; then
+      echo "Error: Careless Whisper overlay is not running." >&2
+      exit 1
+    fi
+
+    run_demo() {
+      local name="$1"
+      if [[ -n "$ONLY" && "$ONLY" != "$name" ]]; then return; fi
+      echo "▶ $name"
+      "$CLI" dismiss 2>/dev/null || true
+      sleep 0.3
+    }
+
+    # --- 1. progress ---
+    run_demo progress
+    if [[ -z "$ONLY" || "$ONLY" == "progress" ]]; then
+      show_json '{"widgets":[{"id":"demo:progress","title":"Build Progress","priority":0,"html":"<div style=\\\"margin-bottom:8px\\\"><div style=\\\"display:flex;justify-content:space-between;margin-bottom:4px\\\"><span style=\\\"font-size:11px;color:#8be9fd;font-family:-apple-system,sans-serif\\\">Compiling modules</span><span data-param=\\\"pct-label\\\" style=\\\"font-size:11px;color:#f8f8f2;font-family:SF Mono,monospace\\\">{{pct-label}}</span></div><div style=\\\"overflow:hidden;border-radius:6px;background:rgba(255,255,255,0.08);height:14px\\\"><div style=\\\"width:var(--pct);height:100%;background:linear-gradient(90deg,#50fa7b,#8be9fd);transition:width 0.4s ease;border-radius:6px\\\"></div></div></div><p data-param=\\\"status\\\" style=\\\"margin:8px 0 0;font-size:11px;color:#6272a4;font-family:-apple-system,sans-serif;text-align:center\\\">{{status}}</p>","params":{"pct":"0%","pct-label":"0%","status":"Starting build…"}}]}'
+      sleep 0.8
+      set_params '{"id":"demo:progress","params":{"pct":"25%","pct-label":"25%","status":"Resolving dependencies…"}}'
+      sleep 0.8
+      set_params '{"id":"demo:progress","params":{"pct":"60%","pct-label":"60%","status":"Compiling Swift modules…"}}'
+      sleep 0.8
+      set_params '{"id":"demo:progress","params":{"pct":"100%","pct-label":"100%","status":"✓ Build complete"}}'
+      sleep "$DELAY"
+    fi
+
+    # --- 2. metrics ---
+    run_demo metrics
+    if [[ -z "$ONLY" || "$ONLY" == "metrics" ]]; then
+      show_json '{"widgets":[{"id":"demo:metrics","title":"System Dashboard","priority":0,"html":"<div style=\\\"display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:8px\\\"><div style=\\\"border:1px solid rgba(80,250,123,0.3);border-radius:8px;padding:8px;text-align:center;background:rgba(80,250,123,0.05)\\\"><div style=\\\"font-size:20px;font-weight:700;color:#50fa7b;font-family:SF Mono,monospace\\\">98%</div><div style=\\\"font-size:9px;color:#6272a4;margin-top:2px;font-family:-apple-system,sans-serif;text-transform:uppercase;letter-spacing:.5px\\\">Tests Pass</div></div><div style=\\\"border:1px solid rgba(139,233,253,0.3);border-radius:8px;padding:8px;text-align:center;background:rgba(139,233,253,0.05)\\\"><div style=\\\"font-size:20px;font-weight:700;color:#8be9fd;font-family:SF Mono,monospace\\\">1.2s</div><div style=\\\"font-size:9px;color:#6272a4;margin-top:2px;font-family:-apple-system,sans-serif;text-transform:uppercase;letter-spacing:.5px\\\">Build Time</div></div><div style=\\\"border:1px solid rgba(189,147,249,0.3);border-radius:8px;padding:8px;text-align:center;background:rgba(189,147,249,0.05)\\\"><div style=\\\"font-size:20px;font-weight:700;color:#bd93f9;font-family:SF Mono,monospace\\\">247</div><div style=\\\"font-size:9px;color:#6272a4;margin-top:2px;font-family:-apple-system,sans-serif;text-transform:uppercase;letter-spacing:.5px\\\">Commits</div></div></div><div style=\\\"display:grid;grid-template-columns:1fr 1fr;gap:6px\\\"><div style=\\\"border:1px solid rgba(255,184,108,0.3);border-radius:8px;padding:8px;text-align:center;background:rgba(255,184,108,0.05)\\\"><div style=\\\"font-size:20px;font-weight:700;color:#ffb86c;font-family:SF Mono,monospace\\\">3</div><div style=\\\"font-size:9px;color:#6272a4;margin-top:2px;font-family:-apple-system,sans-serif;text-transform:uppercase;letter-spacing:.5px\\\">Open PRs</div></div><div style=\\\"border:1px solid rgba(255,85,85,0.3);border-radius:8px;padding:8px;text-align:center;background:rgba(255,85,85,0.05)\\\"><div style=\\\"font-size:20px;font-weight:700;color:#ff5555;font-family:SF Mono,monospace\\\">0</div><div style=\\\"font-size:9px;color:#6272a4;margin-top:2px;font-family:-apple-system,sans-serif;text-transform:uppercase;letter-spacing:.5px\\\">Failures</div></div></div>"}]}'
+      sleep "$DELAY"
+    fi
+
+    # --- 3. sparkline ---
+    run_demo sparkline
+    if [[ -z "$ONLY" || "$ONLY" == "sparkline" ]]; then
+      show_json '{"widgets":[{"id":"demo:chart","title":"Response Time (ms)","priority":0,"html":"<svg width=\\\"100%\\\" height=\\\"80\\\" viewBox=\\\"0 0 380 80\\\" style=\\\"overflow:visible\\\"><defs><linearGradient id=\\\"sparkfill\\\" x1=\\\"0\\\" y1=\\\"0\\\" x2=\\\"0\\\" y2=\\\"1\\\"><stop offset=\\\"0%\\\" stop-color=\\\"#8be9fd\\\" stop-opacity=\\\"0.3\\\"/><stop offset=\\\"100%\\\" stop-color=\\\"#8be9fd\\\" stop-opacity=\\\"0\\\"/></linearGradient></defs><polygon points=\\\"0,65 38,50 76,58 114,30 152,42 190,18 228,35 266,22 304,40 342,15 380,28 380,80 0,80\\\" fill=\\\"url(#sparkfill)\\\"/><polyline points=\\\"0,65 38,50 76,58 114,30 152,42 190,18 228,35 266,22 304,40 342,15 380,28\\\" fill=\\\"none\\\" stroke=\\\"#8be9fd\\\" stroke-width=\\\"2\\\" stroke-linejoin=\\\"round\\\" stroke-linecap=\\\"round\\\"/><circle cx=\\\"380\\\" cy=\\\"28\\\" r=\\\"4\\\" fill=\\\"#8be9fd\\\"/><text x=\\\"380\\\" y=\\\"20\\\" text-anchor=\\\"middle\\\" fill=\\\"#8be9fd\\\" font-size=\\\"10\\\" font-family=\\\"SF Mono,monospace\\\">142ms</text><line x1=\\\"0\\\" y1=\\\"80\\\" x2=\\\"380\\\" y2=\\\"80\\\" stroke=\\\"rgba(255,255,255,0.1)\\\" stroke-width=\\\"1\\\"/></svg><div style=\\\"display:flex;justify-content:space-between;margin-top:4px\\\"><span style=\\\"font-size:9px;color:#6272a4;font-family:-apple-system,sans-serif\\\">30m ago</span><span style=\\\"font-size:9px;color:#6272a4;font-family:-apple-system,sans-serif\\\">now</span></div><div style=\\\"display:flex;gap:12px;margin-top:6px\\\"><span style=\\\"font-size:10px;font-family:SF Mono,monospace;color:#50fa7b\\\">avg 38ms</span><span style=\\\"font-size:10px;font-family:SF Mono,monospace;color:#ffb86c\\\">p95 142ms</span><span style=\\\"font-size:10px;font-family:SF Mono,monospace;color:#ff5555\\\">max 201ms</span></div>"}]}'
+      sleep "$DELAY"
+    fi
+
+    # --- 4. equalizer ---
+    run_demo equalizer
+    if [[ -z "$ONLY" || "$ONLY" == "equalizer" ]]; then
+      show_json '{"widgets":[{"id":"demo:animated","title":"Recording in Progress","priority":0,"html":"<div style=\\\"display:flex;align-items:center;gap:16px;padding:4px 0\\\"><svg width=\\\"48\\\" height=\\\"40\\\" viewBox=\\\"0 0 48 40\\\"><rect x=\\\"2\\\" y=\\\"8\\\" width=\\\"6\\\" height=\\\"32\\\" rx=\\\"3\\\" fill=\\\"#50fa7b\\\"><animate attributeName=\\\"height\\\" values=\\\"32;12;28;8;36;16;32\\\" dur=\\\"1.1s\\\" repeatCount=\\\"indefinite\\\"/><animate attributeName=\\\"y\\\" values=\\\"8;20;12;24;4;18;8\\\" dur=\\\"1.1s\\\" repeatCount=\\\"indefinite\\\"/></rect><rect x=\\\"11\\\" y=\\\"4\\\" width=\\\"6\\\" height=\\\"36\\\" rx=\\\"3\\\" fill=\\\"#50fa7b\\\"><animate attributeName=\\\"height\\\" values=\\\"36;24;8;32;14;36;20;36\\\" dur=\\\"0.8s\\\" repeatCount=\\\"indefinite\\\"/><animate attributeName=\\\"y\\\" values=\\\"4;12;28;4;22;4;16;4\\\" dur=\\\"0.8s\\\" repeatCount=\\\"indefinite\\\"/></rect><rect x=\\\"20\\\" y=\\\"12\\\" width=\\\"6\\\" height=\\\"28\\\" rx=\\\"3\\\" fill=\\\"#50fa7b\\\"><animate attributeName=\\\"height\\\" values=\\\"28;36;16;28;8;24;28\\\" dur=\\\"1.3s\\\" repeatCount=\\\"indefinite\\\"/><animate attributeName=\\\"y\\\" values=\\\"12;4;20;12;28;14;12\\\" dur=\\\"1.3s\\\" repeatCount=\\\"indefinite\\\"/></rect><rect x=\\\"29\\\" y=\\\"6\\\" width=\\\"6\\\" height=\\\"34\\\" rx=\\\"3\\\" fill=\\\"#50fa7b\\\"><animate attributeName=\\\"height\\\" values=\\\"34;14;30;8;26;34;18;34\\\" dur=\\\"0.9s\\\" repeatCount=\\\"indefinite\\\"/><animate attributeName=\\\"y\\\" values=\\\"6;20;8;28;12;6;18;6\\\" dur=\\\"0.9s\\\" repeatCount=\\\"indefinite\\\"/></rect><rect x=\\\"38\\\" y=\\\"10\\\" width=\\\"6\\\" height=\\\"30\\\" rx=\\\"3\\\" fill=\\\"#50fa7b\\\"><animate attributeName=\\\"height\\\" values=\\\"30;36;10;28;18;36;30\\\" dur=\\\"1.2s\\\" repeatCount=\\\"indefinite\\\"/><animate attributeName=\\\"y\\\" values=\\\"10;4;26;8;20;4;10\\\" dur=\\\"1.2s\\\" repeatCount=\\\"indefinite\\\"/></rect></svg><div><div style=\\\"font-size:14px;font-weight:600;color:#f8f8f2;font-family:-apple-system,sans-serif\\\">Listening…</div><div style=\\\"font-size:11px;color:#6272a4;margin-top:2px;font-family:-apple-system,sans-serif\\\">Hold hotkey and speak</div></div></div>"}]}'
+      sleep "$DELAY"
+    fi
+
+    # --- 5. timeline ---
+    run_demo timeline
+    if [[ -z "$ONLY" || "$ONLY" == "timeline" ]]; then
+      show_json '{"widgets":[{"id":"demo:timeline","title":"Deploy Pipeline","priority":0,"html":"<div style=\\\"position:relative;padding-left:24px;font-family:-apple-system,sans-serif\\\"><div style=\\\"position:absolute;left:7px;top:6px;bottom:6px;width:2px;background:linear-gradient(to bottom,#50fa7b,#8be9fd,#bd93f9,rgba(98,114,164,0.3))\\\"></div><div style=\\\"position:relative;margin-bottom:12px\\\"><div style=\\\"position:absolute;left:-20px;top:2px;width:10px;height:10px;border-radius:50%;background:#50fa7b;box-shadow:0 0 6px #50fa7b\\\"></div><div style=\\\"font-size:11px;font-weight:600;color:#50fa7b\\\">Build</div><div style=\\\"font-size:10px;color:#6272a4;margin-top:1px\\\">swift build -c release · 1m 12s</div></div><div style=\\\"position:relative;margin-bottom:12px\\\"><div style=\\\"position:absolute;left:-20px;top:2px;width:10px;height:10px;border-radius:50%;background:#8be9fd;box-shadow:0 0 6px #8be9fd\\\"></div><div style=\\\"font-size:11px;font-weight:600;color:#8be9fd\\\">Test</div><div style=\\\"font-size:10px;color:#6272a4;margin-top:1px\\\">swift test · 247/247 passed · 43s</div></div><div style=\\\"position:relative;margin-bottom:12px\\\"><div style=\\\"position:absolute;left:-20px;top:2px;width:10px;height:10px;border-radius:50%;background:#bd93f9;box-shadow:0 0 6px #bd93f9\\\"></div><div style=\\\"font-size:11px;font-weight:600;color:#bd93f9\\\">Package</div><div style=\\\"font-size:10px;color:#6272a4;margin-top:1px\\\">bundle.sh --release · 18s</div></div><div style=\\\"position:relative\\\"><div style=\\\"position:absolute;left:-20px;top:2px;width:10px;height:10px;border-radius:50%;background:rgba(98,114,164,0.4);border:1px solid rgba(98,114,164,0.6)\\\"></div><div style=\\\"font-size:11px;font-weight:600;color:#6272a4\\\">Deploy</div><div style=\\\"font-size:10px;color:#6272a4;margin-top:1px\\\">waiting…</div></div></div>"}]}'
+      sleep "$DELAY"
+    fi
+
+    # --- 6. heatmap ---
+    run_demo heatmap
+    if [[ -z "$ONLY" || "$ONLY" == "heatmap" ]]; then
+      show_json '{"widgets":[{"id":"demo:heatmap","title":"Commit Activity (last 8 weeks)","priority":0,"html":"<div style=\\\"font-family:-apple-system,sans-serif\\\"><div style=\\\"display:flex;gap:3px;margin-bottom:4px\\\"><div style=\\\"display:flex;flex-direction:column;gap:3px;margin-right:4px\\\"><div style=\\\"height:12px;font-size:8px;color:#6272a4;line-height:12px\\\">M</div><div style=\\\"height:12px;font-size:8px;color:#6272a4;line-height:12px\\\">W</div><div style=\\\"height:12px;font-size:8px;color:#6272a4;line-height:12px\\\">F</div></div><div style=\\\"display:flex;gap:3px\\\"><div style=\\\"display:flex;flex-direction:column;gap:3px\\\"><div style=\\\"width:12px;height:12px;border-radius:2px;background:rgba(80,250,123,0.15)\\\"></div><div style=\\\"width:12px;height:12px;border-radius:2px;background:rgba(80,250,123,0.05)\\\"></div><div style=\\\"width:12px;height:12px;border-radius:2px;background:rgba(80,250,123,0.4)\\\"></div></div><div style=\\\"display:flex;flex-direction:column;gap:3px\\\"><div style=\\\"width:12px;height:12px;border-radius:2px;background:rgba(80,250,123,0.6)\\\"></div><div style=\\\"width:12px;height:12px;border-radius:2px;background:rgba(80,250,123,0.3)\\\"></div><div style=\\\"width:12px;height:12px;border-radius:2px;background:rgba(80,250,123,0.1)\\\"></div></div><div style=\\\"display:flex;flex-direction:column;gap:3px\\\"><div style=\\\"width:12px;height:12px;border-radius:2px;background:rgba(80,250,123,0.05)\\\"></div><div style=\\\"width:12px;height:12px;border-radius:2px;background:rgba(80,250,123,0.8)\\\"></div><div style=\\\"width:12px;height:12px;border-radius:2px;background:rgba(80,250,123,0.9)\\\"></div></div><div style=\\\"display:flex;flex-direction:column;gap:3px\\\"><div style=\\\"width:12px;height:12px;border-radius:2px;background:rgba(80,250,123,0.4)\\\"></div><div style=\\\"width:12px;height:12px;border-radius:2px;background:rgba(80,250,123,0.2)\\\"></div><div style=\\\"width:12px;height:12px;border-radius:2px;background:rgba(80,250,123,0.5)\\\"></div></div><div style=\\\"display:flex;flex-direction:column;gap:3px\\\"><div style=\\\"width:12px;height:12px;border-radius:2px;background:rgba(80,250,123,0.7)\\\"></div><div style=\\\"width:12px;height:12px;border-radius:2px;background:rgba(80,250,123,0.3)\\\"></div><div style=\\\"width:12px;height:12px;border-radius:2px;background:rgba(80,250,123,0.1)\\\"></div></div><div style=\\\"display:flex;flex-direction:column;gap:3px\\\"><div style=\\\"width:12px;height:12px;border-radius:2px;background:rgba(80,250,123,0.2)\\\"></div><div style=\\\"width:12px;height:12px;border-radius:2px;background:rgba(80,250,123,1.0)\\\"></div><div style=\\\"width:12px;height:12px;border-radius:2px;background:rgba(80,250,123,0.6)\\\"></div></div><div style=\\\"display:flex;flex-direction:column;gap:3px\\\"><div style=\\\"width:12px;height:12px;border-radius:2px;background:rgba(80,250,123,0.5)\\\"></div><div style=\\\"width:12px;height:12px;border-radius:2px;background:rgba(80,250,123,0.4)\\\"></div><div style=\\\"width:12px;height:12px;border-radius:2px;background:rgba(80,250,123,0.8)\\\"></div></div><div style=\\\"display:flex;flex-direction:column;gap:3px\\\"><div style=\\\"width:12px;height:12px;border-radius:2px;background:rgba(80,250,123,0.9)\\\"></div><div style=\\\"width:12px;height:12px;border-radius:2px;background:rgba(80,250,123,0.2)\\\"></div><div style=\\\"width:12px;height:12px;border-radius:2px;background:rgba(80,250,123,0.3)\\\"></div></div></div></div><div style=\\\"display:flex;align-items:center;gap:4px;margin-top:4px\\\"><span style=\\\"font-size:9px;color:#6272a4\\\">less</span><div style=\\\"width:10px;height:10px;border-radius:2px;background:rgba(80,250,123,0.05)\\\"></div><div style=\\\"width:10px;height:10px;border-radius:2px;background:rgba(80,250,123,0.25)\\\"></div><div style=\\\"width:10px;height:10px;border-radius:2px;background:rgba(80,250,123,0.5)\\\"></div><div style=\\\"width:10px;height:10px;border-radius:2px;background:rgba(80,250,123,0.75)\\\"></div><div style=\\\"width:10px;height:10px;border-radius:2px;background:rgba(80,250,123,1.0)\\\"></div><span style=\\\"font-size:9px;color:#6272a4\\\">more</span></div></div>"}]}'
+      sleep "$DELAY"
+    fi
+
+    # --- 7. multi ---
+    run_demo multi
+    if [[ -z "$ONLY" || "$ONLY" == "multi" ]]; then
+      show_json '{"widgets":[{"id":"demo:git","title":"Git Status","priority":0,"html":"<div style=\\\"font-family:SF Mono,monospace;font-size:11px\\\"><div style=\\\"color:#50fa7b;margin-bottom:3px\\\">● main — 3 ahead</div><div style=\\\"color:#ffb86c\\\">M Sources/App/AppState.swift</div><div style=\\\"color:#ffb86c\\\">M Sources/Server/HTMLComposer.swift</div><div style=\\\"color:#8be9fd\\\">? Sources/UI/NewView.swift</div></div>"},{"id":"demo:ci","title":"CI / GitHub","priority":1,"html":"<div style=\\\"font-family:-apple-system,sans-serif;font-size:11px\\\"><div style=\\\"display:flex;align-items:center;gap:6px;margin-bottom:4px\\\"><svg width=\\\"10\\\" height=\\\"10\\\" viewBox=\\\"0 0 10 10\\\"><circle cx=\\\"5\\\" cy=\\\"5\\\" r=\\\"4\\\" fill=\\\"#50fa7b\\\"/></svg><span style=\\\"color:#f8f8f2\\\">CI passing</span><span style=\\\"color:#6272a4;margin-left:auto\\\">2m ago</span></div><div style=\\\"display:flex;align-items:center;gap:6px\\\"><svg width=\\\"10\\\" height=\\\"10\\\" viewBox=\\\"0 0 10 10\\\"><circle cx=\\\"5\\\" cy=\\\"5\\\" r=\\\"4\\\" fill=\\\"none\\\" stroke=\\\"#ffb86c\\\" stroke-width=\\\"2\\\"/></svg><span style=\\\"color:#f8f8f2\\\">PR #12 — review requested</span></div></div>"}]}'
+      sleep "$DELAY"
+    fi
+
+    # --- 8. barchart ---
+    run_demo barchart
+    if [[ -z "$ONLY" || "$ONLY" == "barchart" ]]; then
+      show_json '{"widgets":[{"id":"demo:bars","title":"Test Duration by Module (ms)","priority":0,"html":"<svg width=\\\"100%\\\" height=\\\"110\\\" viewBox=\\\"0 0 380 110\\\"><defs><linearGradient id=\\\"b1\\\" x1=\\\"0\\\" y1=\\\"0\\\" x2=\\\"0\\\" y2=\\\"1\\\"><stop offset=\\\"0%\\\" stop-color=\\\"#8be9fd\\\"/><stop offset=\\\"100%\\\" stop-color=\\\"#8be9fd\\\" stop-opacity=\\\"0.5\\\"/></linearGradient><linearGradient id=\\\"b2\\\" x1=\\\"0\\\" y1=\\\"0\\\" x2=\\\"0\\\" y2=\\\"1\\\"><stop offset=\\\"0%\\\" stop-color=\\\"#50fa7b\\\"/><stop offset=\\\"100%\\\" stop-color=\\\"#50fa7b\\\" stop-opacity=\\\"0.5\\\"/></linearGradient><linearGradient id=\\\"b3\\\" x1=\\\"0\\\" y1=\\\"0\\\" x2=\\\"0\\\" y2=\\\"1\\\"><stop offset=\\\"0%\\\" stop-color=\\\"#bd93f9\\\"/><stop offset=\\\"100%\\\" stop-color=\\\"#bd93f9\\\" stop-opacity=\\\"0.5\\\"/></linearGradient><linearGradient id=\\\"b4\\\" x1=\\\"0\\\" y1=\\\"0\\\" x2=\\\"0\\\" y2=\\\"1\\\"><stop offset=\\\"0%\\\" stop-color=\\\"#ffb86c\\\"/><stop offset=\\\"100%\\\" stop-color=\\\"#ffb86c\\\" stop-opacity=\\\"0.5\\\"/></linearGradient><linearGradient id=\\\"b5\\\" x1=\\\"0\\\" y1=\\\"0\\\" x2=\\\"0\\\" y2=\\\"1\\\"><stop offset=\\\"0%\\\" stop-color=\\\"#ff79c6\\\"/><stop offset=\\\"100%\\\" stop-color=\\\"#ff79c6\\\" stop-opacity=\\\"0.5\\\"/></linearGradient></defs><line x1=\\\"0\\\" y1=\\\"85\\\" x2=\\\"380\\\" y2=\\\"85\\\" stroke=\\\"rgba(255,255,255,0.1)\\\" stroke-width=\\\"1\\\"/><rect x=\\\"10\\\" y=\\\"30\\\" width=\\\"52\\\" height=\\\"55\\\" rx=\\\"4\\\" fill=\\\"url(#b1)\\\"/><rect x=\\\"82\\\" y=\\\"50\\\" width=\\\"52\\\" height=\\\"35\\\" rx=\\\"4\\\" fill=\\\"url(#b2)\\\"/><rect x=\\\"154\\\" y=\\\"15\\\" width=\\\"52\\\" height=\\\"70\\\" rx=\\\"4\\\" fill=\\\"url(#b3)\\\"/><rect x=\\\"226\\\" y=\\\"60\\\" width=\\\"52\\\" height=\\\"25\\\" rx=\\\"4\\\" fill=\\\"url(#b4)\\\"/><rect x=\\\"298\\\" y=\\\"40\\\" width=\\\"52\\\" height=\\\"45\\\" rx=\\\"4\\\" fill=\\\"url(#b5)\\\"/><text x=\\\"36\\\" y=\\\"25\\\" text-anchor=\\\"middle\\\" fill=\\\"#8be9fd\\\" font-size=\\\"10\\\" font-family=\\\"SF Mono,monospace\\\">548</text><text x=\\\"108\\\" y=\\\"45\\\" text-anchor=\\\"middle\\\" fill=\\\"#50fa7b\\\" font-size=\\\"10\\\" font-family=\\\"SF Mono,monospace\\\">351</text><text x=\\\"180\\\" y=\\\"10\\\" text-anchor=\\\"middle\\\" fill=\\\"#bd93f9\\\" font-size=\\\"10\\\" font-family=\\\"SF Mono,monospace\\\">698</text><text x=\\\"252\\\" y=\\\"55\\\" text-anchor=\\\"middle\\\" fill=\\\"#ffb86c\\\" font-size=\\\"10\\\" font-family=\\\"SF Mono,monospace\\\">249</text><text x=\\\"324\\\" y=\\\"35\\\" text-anchor=\\\"middle\\\" fill=\\\"#ff79c6\\\" font-size=\\\"10\\\" font-family=\\\"SF Mono,monospace\\\">451</text><text x=\\\"36\\\" y=\\\"98\\\" text-anchor=\\\"middle\\\" fill=\\\"#6272a4\\\" font-size=\\\"9\\\" font-family=\\\"-apple-system,sans-serif\\\">Audio</text><text x=\\\"108\\\" y=\\\"98\\\" text-anchor=\\\"middle\\\" fill=\\\"#6272a4\\\" font-size=\\\"9\\\" font-family=\\\"-apple-system,sans-serif\\\">Transc.</text><text x=\\\"180\\\" y=\\\"98\\\" text-anchor=\\\"middle\\\" fill=\\\"#6272a4\\\" font-size=\\\"9\\\" font-family=\\\"-apple-system,sans-serif\\\">Inject</text><text x=\\\"252\\\" y=\\\"98\\\" text-anchor=\\\"middle\\\" fill=\\\"#6272a4\\\" font-size=\\\"9\\\" font-family=\\\"-apple-system,sans-serif\\\">Git</text><text x=\\\"324\\\" y=\\\"98\\\" text-anchor=\\\"middle\\\" fill=\\\"#6272a4\\\" font-size=\\\"9\\\" font-family=\\\"-apple-system,sans-serif\\\">Server</text></svg>"}]}'
+      sleep "$DELAY"
+    fi
+
+    echo "✓ Demo complete"
     """
 }

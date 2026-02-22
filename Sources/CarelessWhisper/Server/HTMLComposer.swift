@@ -5,15 +5,17 @@ enum HTMLComposer {
     static func compose(widgets: [AgentWidget]) -> String {
         let sorted = widgets.sorted { $0.priority < $1.priority }
         let cards = sorted.map { widget in
-            let sanitized = sanitizeHTML(widget.html)
+            let substituted = substituteParams(widget.html, params: widget.params)
+            let sanitized = sanitizeHTML(substituted)
             let titleHTML: String
             if let title = widget.title {
                 titleHTML = "<div class=\"widget-title\">\(escapeHTML(title))</div>"
             } else {
                 titleHTML = ""
             }
+            let customProps = cssCustomProperties(widget.params)
             return """
-            <div class="widget-card" data-widget-id="\(escapeHTML(widget.id))">
+            <div class="widget-card" data-widget-id="\(escapeHTML(widget.id))"\(customProps)>
               \(titleHTML)
               <div class="widget-content">\(sanitized)</div>
             </div>
@@ -90,9 +92,41 @@ enum HTMLComposer {
         </head>
         <body>
           \(cards)
+          <script>
+          function _updateWidgetParams(widgetId, params) {
+            var c = document.querySelector('[data-widget-id="' + widgetId + '"]');
+            if (!c) return false;
+            for (var key in params) {
+              var val = params[key];
+              c.style.setProperty('--' + key, val);
+              var els = c.querySelectorAll('[data-param="' + key + '"]');
+              for (var i = 0; i < els.length; i++) els[i].textContent = val;
+            }
+            return true;
+          }
+          </script>
         </body>
         </html>
         """
+    }
+
+    // MARK: - Param Substitution
+
+    /// Replaces `{{key}}` placeholders in the HTML template with values from the params dictionary.
+    static func substituteParams(_ html: String, params: [String: String]?) -> String {
+        guard let params, !params.isEmpty else { return html }
+        var result = html
+        for (key, value) in params {
+            result = result.replacingOccurrences(of: "{{\(key)}}", with: value)
+        }
+        return result
+    }
+
+    /// Generates an inline `style` attribute fragment setting CSS custom properties for each param.
+    private static func cssCustomProperties(_ params: [String: String]?) -> String {
+        guard let params, !params.isEmpty else { return "" }
+        let props = params.map { "--\(escapeHTML($0.key)): \(escapeHTML($0.value))" }.joined(separator: "; ")
+        return " style=\"\(props)\""
     }
 
     // MARK: - Sanitization

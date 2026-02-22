@@ -20,6 +20,7 @@ final class WidgetModelTests: XCTestCase {
         let widget = AgentWidget(id: "w", html: "<p>hi</p>")
         XCTAssertEqual(widget.priority, 0)
         XCTAssertNil(widget.title)
+        XCTAssertNil(widget.params)
     }
 
     func testAgentWidgetOptionalTitle() throws {
@@ -77,6 +78,47 @@ final class WidgetModelTests: XCTestCase {
         XCTAssertTrue(decoded.ok)
         XCTAssertEqual(decoded.widgetCount, 3)
         XCTAssertTrue(decoded.overlayVisible)
+    }
+
+    // MARK: - Params
+
+    func testAgentWidgetWithParams() throws {
+        let widget = AgentWidget(
+            id: "pw",
+            html: "<p>{{msg}}</p>",
+            params: ["msg": "hello", "count": "5"]
+        )
+        let data = try JSONEncoder().encode(widget)
+        let decoded = try JSONDecoder().decode(AgentWidget.self, from: data)
+        XCTAssertEqual(decoded.params?["msg"], "hello")
+        XCTAssertEqual(decoded.params?["count"], "5")
+    }
+
+    func testAgentWidgetOptionalParams() throws {
+        let json = """
+        {"id":"x","html":"<b>bold</b>","priority":0}
+        """
+        let widget = try JSONDecoder().decode(AgentWidget.self, from: Data(json.utf8))
+        XCTAssertNil(widget.params)
+    }
+
+    func testUpdateParamsRequestDecode() throws {
+        let json = """
+        {"id":"claude:build","params":{"pct":"75","status":"Building..."}}
+        """
+        let request = try JSONDecoder().decode(UpdateParamsRequest.self, from: Data(json.utf8))
+        XCTAssertEqual(request.id, "claude:build")
+        XCTAssertEqual(request.params["pct"], "75")
+        XCTAssertEqual(request.params["status"], "Building...")
+    }
+
+    func testUpdateParamsRequestDecodeWithoutId() throws {
+        let json = """
+        {"params":{"pct":"75"}}
+        """
+        let request = try JSONDecoder().decode(UpdateParamsRequest.self, from: Data(json.utf8))
+        XCTAssertNil(request.id)
+        XCTAssertEqual(request.params["pct"], "75")
     }
 
     // MARK: - ServerInfo

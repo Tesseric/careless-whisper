@@ -292,8 +292,8 @@ struct OverlayContentView: View {
 
     @ViewBuilder
     private var widgetView: some View {
-        let composed = HTMLComposer.compose(widgets: appState.agentWidgets)
-        WidgetWebView(html: composed, contentHeight: $webViewHeight)
+        let composed = HTMLComposer.compose(widgets: appState.composableWidgets)
+        WidgetWebView(html: composed, contentHeight: $webViewHeight, bridge: appState.widgetBridge)
             .frame(height: webViewHeight)
             .onChange(of: webViewHeight) { _, newHeight in
                 appState.widgetContentHeight = newHeight
