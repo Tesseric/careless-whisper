@@ -62,7 +62,7 @@ cp "$PROJECT_DIR/resources/AppIcon.icns" "$RESOURCES_DIR/AppIcon.icns"
 # Sign with local development identity so macOS accessibility permission
 # persists across rebuilds (ad-hoc signatures change every build, which
 # invalidates TCC grants like the CGEventTap used for key interception).
-SIGN_IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null | grep "Apple Development" | head -1 | sed 's/.*"\(.*\)".*/\1/')
+SIGN_IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null | grep "Apple Development" | head -1 | sed 's/.*"\(.*\)".*/\1/' || true)
 if [[ -n "$SIGN_IDENTITY" ]]; then
     codesign --force --sign "$SIGN_IDENTITY" "$MACOS_DIR/CarelessWhisper"
     echo "Signed with: $SIGN_IDENTITY"
