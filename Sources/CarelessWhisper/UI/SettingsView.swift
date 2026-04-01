@@ -144,6 +144,8 @@ struct SettingsView: View {
 
             Toggle("Press Enter after transcription", isOn: $appState.autoEnter)
 
+            Toggle("Toggle mode (tap to start/stop instead of hold)", isOn: $appState.toggleMode)
+
             Toggle("Launch at login", isOn: $launchAtLogin)
                 .onChange(of: launchAtLogin) { _, newValue in
                     do {

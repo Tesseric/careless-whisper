@@ -69,6 +69,7 @@ final class AppState: ObservableObject {
     @AppStorage("selectedInputDevice") var selectedInputDeviceID: Int = 0
     @AppStorage("autoEnter") var autoEnter: Bool = false
     @AppStorage("agentOverlayEnabled") var agentOverlayEnabled: Bool = false
+    @AppStorage("toggleMode") var toggleMode: Bool = false
 
     var selectedModel: WhisperModel {
         WhisperModel(rawValue: selectedModelRaw) ?? .baseEn
@@ -89,14 +90,22 @@ final class AppState: ObservableObject {
     init() {
         updateHotkeyDescription()
 
-        hotKeyManager.onPushToTalkStarted = { [weak self] in
+        hotKeyManager.onHotKeyPressed = { [weak self] in
             Task { @MainActor in
-                self?.startRecording()
+                guard let self else { return }
+                if self.toggleMode && self.recordingState == .recording {
+                    self.stopRecordingAndTranscribe()
+                } else {
+                    self.startRecording()
+                }
             }
         }
-        hotKeyManager.onPushToTalkEnded = { [weak self] in
+        hotKeyManager.onHotKeyReleased = { [weak self] in
             Task { @MainActor in
-                self?.stopRecordingAndTranscribe()
+                guard let self else { return }
+                if !self.toggleMode {
+                    self.stopRecordingAndTranscribe()
+                }
             }
         }
         keyInterceptor.onKeyIntercepted = { [weak self] in

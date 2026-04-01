@@ -6,8 +6,8 @@ import os
 final class HotKeyManager {
     private let logger = Logger(subsystem: "com.carelesswhisper", category: "HotKeyManager")
 
-    var onPushToTalkStarted: (() -> Void)?
-    var onPushToTalkEnded: (() -> Void)?
+    var onHotKeyPressed: (() -> Void)?
+    var onHotKeyReleased: (() -> Void)?
 
     private var hotKey: HotKey?
     private var isHolding = false
@@ -35,14 +35,14 @@ final class HotKeyManager {
             guard let self, !self.isHolding else { return }
             self.isHolding = true
             self.logger.info("Push-to-talk: key down")
-            self.onPushToTalkStarted?()
+            self.onHotKeyPressed?()
         }
 
         hk.keyUpHandler = { [weak self] in
             guard let self, self.isHolding else { return }
             self.isHolding = false
             self.logger.info("Push-to-talk: key up")
-            self.onPushToTalkEnded?()
+            self.onHotKeyReleased?()
         }
 
         self.hotKey = hk
