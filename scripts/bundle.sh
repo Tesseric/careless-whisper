@@ -56,6 +56,9 @@ mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 # Copy binary
 cp "$BINARY_PATH" "$MACOS_DIR/CarelessWhisper"
 
+# Copy app icon
+cp "$PROJECT_DIR/resources/AppIcon.icns" "$RESOURCES_DIR/AppIcon.icns"
+
 # Create Info.plist
 cat > "$CONTENTS_DIR/Info.plist" << PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -63,11 +66,11 @@ cat > "$CONTENTS_DIR/Info.plist" << PLIST
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>Careless Whisper</string>
+    <string>${APP_NAME}</string>
     <key>CFBundleDisplayName</key>
-    <string>Careless Whisper</string>
+    <string>${APP_NAME}</string>
     <key>CFBundleIdentifier</key>
-    <string>com.carelesswhisper.app</string>
+    <string>${BUNDLE_ID}</string>
     <key>CFBundleVersion</key>
     <string>${VERSION}</string>
     <key>CFBundleShortVersionString</key>
@@ -82,6 +85,8 @@ cat > "$CONTENTS_DIR/Info.plist" << PLIST
     <true/>
     <key>NSMicrophoneUsageDescription</key>
     <string>Careless Whisper needs microphone access to record your voice for transcription.</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>NSHighResolutionCapable</key>
     <true/>
 </dict>
