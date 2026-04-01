@@ -59,8 +59,16 @@ final class KeyInterceptor {
     }
 
     /// Enable key interception. Call when recording starts and an image is detected.
+    /// Lazily installs the tap if it hasn't been created yet (e.g. accessibility
+    /// permission was granted after the initial install() call).
     func activate() {
-        guard let tap = eventTap else { return }
+        if eventTap == nil {
+            install()
+        }
+        guard let tap = eventTap else {
+            logger.warning("Cannot activate — event tap not available (accessibility permission missing?)")
+            return
+        }
         isActive = true
         CGEvent.tapEnable(tap: tap, enable: true)
         logger.info("Key interceptor activated")
@@ -90,12 +98,13 @@ final class KeyInterceptor {
         let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
         guard keyCode == Int64(kVK_ANSI_1) else { return event }
 
-        // Suppress the keystroke and notify
+        // Suppress the keystroke and notify.
+        // Call directly — the CGEventTap callback runs on the main run loop,
+        // so there's no need to dispatch async. Dispatching would add a hop
+        // that lets stopRecordingAndTranscribe() win the race and change
+        // recordingState before confirmImageAttach() runs.
         logger.info("Intercepted '1' key press")
-        let callback = onKeyIntercepted
-        DispatchQueue.main.async {
-            callback?()
-        }
+        onKeyIntercepted?()
         return nil
     }
 }

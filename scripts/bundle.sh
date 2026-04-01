@@ -59,6 +59,17 @@ cp "$BINARY_PATH" "$MACOS_DIR/CarelessWhisper"
 # Copy app icon
 cp "$PROJECT_DIR/resources/AppIcon.icns" "$RESOURCES_DIR/AppIcon.icns"
 
+# Sign with local development identity so macOS accessibility permission
+# persists across rebuilds (ad-hoc signatures change every build, which
+# invalidates TCC grants like the CGEventTap used for key interception).
+SIGN_IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null | grep "Apple Development" | head -1 | sed 's/.*"\(.*\)".*/\1/')
+if [[ -n "$SIGN_IDENTITY" ]]; then
+    codesign --force --sign "$SIGN_IDENTITY" "$MACOS_DIR/CarelessWhisper"
+    echo "Signed with: $SIGN_IDENTITY"
+else
+    echo "Warning: No Apple Development signing identity found — accessibility permission will reset on each rebuild"
+fi
+
 # Create Info.plist
 cat > "$CONTENTS_DIR/Info.plist" << PLIST
 <?xml version="1.0" encoding="UTF-8"?>
