@@ -150,7 +150,7 @@ enum WidgetTemplateRegistry {
             <span data-param="pct" style="font-size:11px;color:#f8f8f2;font-family:SF Mono,monospace">\(pct)</span>
           </div>
           <div style="overflow:hidden;border-radius:6px;background:rgba(255,255,255,0.08);height:14px">
-            <div style="width:var(--pct);height:100%;background:linear-gradient(90deg,#50fa7b,#8be9fd);transition:width 0.4s ease;border-radius:6px"></div>
+            <div class="cw-anim-grow-x" style="width:var(--pct);height:100%;background:linear-gradient(90deg,#50fa7b,#8be9fd);transition:width 0.4s ease;border-radius:6px"></div>
           </div>
         </div>
         <p data-param="status" style="margin:8px 0 0;font-size:11px;color:\(mutedText);font-family:-apple-system,sans-serif;text-align:center">\(status)</p>
@@ -177,8 +177,8 @@ enum WidgetTemplateRegistry {
             let margin = isLast ? "" : "margin-bottom:12px;"
 
             html += """
-              <div style="position:relative;\(margin)">
-                <div style="position:absolute;left:-20px;top:2px;width:10px;height:10px;border-radius:50%;\(dotStyle)"></div>
+              <div class="cw-anim-fade-up" style="--i:\(i);position:relative;\(margin)">
+                <div class="cw-anim-pop" style="--i:\(i);position:absolute;left:-20px;top:2px;width:10px;height:10px;border-radius:50%;\(dotStyle)"></div>
                 <div data-pipe="labels" style="font-size:11px;font-weight:600;color:\(textColor)">\(esc(label))</div>
             """
             if let detail, !detail.isEmpty {
@@ -222,7 +222,7 @@ enum WidgetTemplateRegistry {
         for i in 0..<count {
             let c = color(at: i)
             html += """
-              <div style="border:1px solid \(c)33;border-radius:8px;padding:8px;text-align:center;background:\(c)0d">
+              <div class="cw-anim-fade-scale" style="--i:\(i);border:1px solid \(c)33;border-radius:8px;padding:8px;text-align:center;background:\(c)0d">
                 <div data-pipe="values" style="font-size:20px;font-weight:700;color:\(c);font-family:SF Mono,monospace">\(esc(values[i]))</div>
                 <div data-pipe="labels" style="font-size:9px;color:\(mutedText);margin-top:2px;font-family:-apple-system,sans-serif;text-transform:uppercase;letter-spacing:.5px">\(esc(labels[i]))</div>
               </div>
@@ -240,7 +240,7 @@ enum WidgetTemplateRegistry {
         let headers = split(p["headers"]!)
         let rowStrings = split(p["rows"]!)
 
-        var html = "<table style=\"border-collapse:collapse;width:100%;font-family:-apple-system,sans-serif;font-size:12px\">\n<thead><tr>\n"
+        var html = "<table style=\"border-collapse:collapse;width:100%;font-family:-apple-system,sans-serif;font-size:12px\">\n<thead><tr class=\"cw-anim-fade-up\" style=\"--i:0\">\n"
 
         for header in headers {
             html += "  <th style=\"border:1px solid rgba(255,255,255,0.1);padding:4px 8px;text-align:left;background:rgba(255,255,255,0.05);font-weight:600;color:#bd93f9\">\(esc(header))</th>\n"
@@ -248,9 +248,9 @@ enum WidgetTemplateRegistry {
         html += "</tr></thead>\n<tbody>\n"
 
         // Rows are pipe-delimited, cells within a row are comma-delimited
-        for row in rowStrings {
+        for (rowIndex, row) in rowStrings.enumerated() {
             let cells = row.components(separatedBy: ",")
-            html += "<tr>\n"
+            html += "<tr class=\"cw-anim-fade-up\" style=\"--i:\(rowIndex + 1)\">\n"
             for cell in cells {
                 html += "  <td style=\"border:1px solid rgba(255,255,255,0.1);padding:4px 8px;color:#f8f8f2\">\(esc(cell.trimmingCharacters(in: .whitespaces)))</td>\n"
             }
@@ -279,8 +279,8 @@ enum WidgetTemplateRegistry {
             let margin = isLast ? "" : "margin-bottom:8px;"
 
             html += """
-              <div style="display:flex;align-items:center;gap:8px;\(margin)">
-                <span data-pipe="statuses" style="font-size:9px;font-weight:600;color:\(badgeColor);background:\(badgeColor)1a;padding:2px 6px;border-radius:4px;min-width:48px;text-align:center">\(esc(badgeText))</span>
+              <div class="cw-anim-fade-up" style="--i:\(i);display:flex;align-items:center;gap:8px;\(margin)">
+                <span data-pipe="statuses" class="cw-anim-pop" style="--i:\(i);font-size:9px;font-weight:600;color:\(badgeColor);background:\(badgeColor)1a;padding:2px 6px;border-radius:4px;min-width:48px;text-align:center">\(esc(badgeText))</span>
                 <div style="flex:1">
                   <div data-pipe="labels" style="font-size:11px;color:#f8f8f2">\(esc(labels[i]))</div>
             """
@@ -322,7 +322,7 @@ enum WidgetTemplateRegistry {
         let (borderColor, icon) = messageStyle(for: type)
 
         var html = """
-        <div style="border-left:3px solid \(borderColor);padding:8px 12px;font-family:-apple-system,sans-serif">
+        <div class="cw-anim-fade-down" style="border-left:3px solid \(borderColor);padding:8px 12px;font-family:-apple-system,sans-serif">
           <div style="display:flex;align-items:center;gap:6px">
             <span style="font-size:14px">\(icon)</span>
             <span data-param="text" style="font-size:12px;font-weight:500;color:#f8f8f2">\(text)</span>
@@ -359,7 +359,7 @@ enum WidgetTemplateRegistry {
             let isLast = i == count - 1
             let border = isLast ? "" : "border-bottom:1px solid rgba(255,255,255,0.06);"
             html += """
-              <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;\(border)">
+              <div class="cw-anim-fade-up" style="--i:\(i);display:flex;justify-content:space-between;align-items:center;padding:4px 0;\(border)">
                 <span style="font-size:11px;color:\(mutedText)">\(esc(keys[i]))</span>
                 <span style="font-size:11px;color:#f8f8f2;font-family:SF Mono,monospace">\(esc(values[i]))</span>
               </div>
@@ -425,14 +425,15 @@ enum WidgetTemplateRegistry {
             let cx = x + barWidth / 2
             let c = color(at: i)
 
-            svg += "<rect x=\"\(x)\" y=\"\(y)\" width=\"\(barWidth)\" height=\"\(barHeight)\" rx=\"4\" fill=\"url(#tbar\(uid)\(i))\"/>\n"
-            svg += "<text x=\"\(cx)\" y=\"\(y - 5)\" text-anchor=\"middle\" fill=\"\(c)\" font-size=\"10\" font-family=\"SF Mono,monospace\">\(esc(valueStrs[i].trimmingCharacters(in: .whitespaces)))</text>\n"
+            let baseline = barAreaHeight + 5
+            svg += "<rect x=\"\(x)\" y=\"\(y)\" width=\"\(barWidth)\" height=\"\(barHeight)\" rx=\"4\" fill=\"url(#tbar\(uid)\(i))\" class=\"cw-anim-grow-y\" style=\"--i:\(i);transform-origin:\(cx)px \(baseline)px\"/>\n"
+            svg += "<text x=\"\(cx)\" y=\"\(y - 5)\" text-anchor=\"middle\" fill=\"\(c)\" font-size=\"10\" font-family=\"SF Mono,monospace\" class=\"cw-anim-bar-label\" style=\"--i:\(i)\">\(esc(valueStrs[i].trimmingCharacters(in: .whitespaces)))</text>\n"
             let labelY = barAreaHeight + 16
             let labelText = esc(labels[i].trimmingCharacters(in: .whitespaces))
             if rotateLabels {
-                svg += "<text x=\"\(cx)\" y=\"\(labelY)\" text-anchor=\"start\" fill=\"\(mutedText)\" font-size=\"11\" font-family=\"-apple-system,sans-serif\" transform=\"rotate(45,\(cx),\(labelY))\">\(labelText)</text>\n"
+                svg += "<text x=\"\(cx)\" y=\"\(labelY)\" text-anchor=\"start\" fill=\"\(mutedText)\" font-size=\"11\" font-family=\"-apple-system,sans-serif\" transform=\"rotate(45,\(cx),\(labelY))\" class=\"cw-anim-bar-label\" style=\"--i:\(i)\">\(labelText)</text>\n"
             } else {
-                svg += "<text x=\"\(cx)\" y=\"\(labelY)\" text-anchor=\"middle\" fill=\"\(mutedText)\" font-size=\"11\" font-family=\"-apple-system,sans-serif\">\(labelText)</text>\n"
+                svg += "<text x=\"\(cx)\" y=\"\(labelY)\" text-anchor=\"middle\" fill=\"\(mutedText)\" font-size=\"11\" font-family=\"-apple-system,sans-serif\" class=\"cw-anim-bar-label\" style=\"--i:\(i)\">\(labelText)</text>\n"
             }
         }
 

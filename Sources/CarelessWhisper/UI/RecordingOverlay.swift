@@ -298,8 +298,10 @@ struct OverlayContentView: View {
         // for param-only changes. Param updates go through JS injection via widgetBridge,
         // avoiding a full loadHTMLString reload that would cause flicker and break CSS transitions.
         let composed = HTMLComposer.compose(widgets: appState.agentWidgets)
+        let maxWebViewHeight = (NSScreen.main?.visibleFrame.height ?? 840) - 120
+        let clampedHeight = min(webViewHeight, maxWebViewHeight)
         WidgetWebView(html: composed, contentHeight: $webViewHeight, bridge: appState.widgetBridge)
-            .frame(height: webViewHeight)
+            .frame(height: clampedHeight)
             .onChange(of: webViewHeight) { _, newHeight in
                 appState.widgetContentHeight = newHeight
             }
