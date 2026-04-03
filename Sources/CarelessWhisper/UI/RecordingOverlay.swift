@@ -25,9 +25,9 @@ final class OverlayController {
 
     private static let gitColumnWidth: CGFloat = 260
     private static let gapWidth: CGFloat = 12
-    private static let widgetColumnWidth: CGFloat = 420
-    static let dualWidth: CGFloat = gitColumnWidth + gapWidth + widgetColumnWidth  // 692
-    static let singleWidth: CGFloat = widgetColumnWidth  // 420
+    private static let widgetColumnWidth: CGFloat = 600
+    static let dualWidth: CGFloat = gitColumnWidth + gapWidth + widgetColumnWidth  // 872
+    static let singleWidth: CGFloat = widgetColumnWidth  // 600
 
     /// The intended panel width (not the mid-animation value).
     private var targetPanelWidth: CGFloat = singleWidth
@@ -43,7 +43,7 @@ final class OverlayController {
         let hosting = SizeObservingHostingView(rootView: overlayView)
 
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 420, height: 200),
+            contentRect: NSRect(x: 0, y: 0, width: 600, height: 200),
             styleMask: [.nonactivatingPanel, .hudWindow],
             backing: .buffered,
             defer: false

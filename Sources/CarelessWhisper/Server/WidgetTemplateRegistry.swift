@@ -385,16 +385,25 @@ enum WidgetTemplateRegistry {
         // Unique prefix per render to avoid SVG gradient ID collisions across widgets
         let uid = String(UUID().uuidString.prefix(8))
 
-        let svgWidth = 380
+        let svgWidth = 560
         let barAreaHeight = 70
-        let svgHeight = 110
         let gap = 8
         let totalGaps = (count - 1) * gap
         let barWidth = max(10, (svgWidth - totalGaps - 20) / count)
         let totalBarsWidth = count * barWidth + totalGaps
         let startX = (svgWidth - totalBarsWidth) / 2
 
-        var svg = "<svg width=\"100%\" height=\"\(svgHeight)\" viewBox=\"0 0 \(svgWidth) \(svgHeight)\">\n"
+        // Estimate if labels fit horizontally (~6.5px per character at font-size 11)
+        let longestLabel = labels.prefix(count).map { $0.trimmingCharacters(in: .whitespaces).count }.max() ?? 0
+        let estimatedLabelWidth = Double(longestLabel) * 6.5
+        let spacePerBar = Double(barWidth + gap)
+        let rotateLabels = estimatedLabelWidth > spacePerBar
+
+        // When rotated 45°, vertical drop ≈ textWidth * sin(45°); avg char width ~5px at font-size 11
+        let labelAreaHeight = rotateLabels ? 8 + Int(Double(longestLabel) * 5.0 * 0.707) : 22
+        let svgHeight = barAreaHeight + 5 + labelAreaHeight
+
+        var svg = "<svg width=\"100%\" height=\"\(svgHeight)\" viewBox=\"0 0 \(svgWidth) \(svgHeight)\" overflow=\"visible\">\n"
         svg += "<defs>\n"
         for i in 0..<count {
             let c = color(at: i)
@@ -418,7 +427,13 @@ enum WidgetTemplateRegistry {
 
             svg += "<rect x=\"\(x)\" y=\"\(y)\" width=\"\(barWidth)\" height=\"\(barHeight)\" rx=\"4\" fill=\"url(#tbar\(uid)\(i))\"/>\n"
             svg += "<text x=\"\(cx)\" y=\"\(y - 5)\" text-anchor=\"middle\" fill=\"\(c)\" font-size=\"10\" font-family=\"SF Mono,monospace\">\(esc(valueStrs[i].trimmingCharacters(in: .whitespaces)))</text>\n"
-            svg += "<text x=\"\(cx)\" y=\"\(barAreaHeight + 20)\" text-anchor=\"middle\" fill=\"\(mutedText)\" font-size=\"9\" font-family=\"-apple-system,sans-serif\">\(esc(labels[i].trimmingCharacters(in: .whitespaces)))</text>\n"
+            let labelY = barAreaHeight + 16
+            let labelText = esc(labels[i].trimmingCharacters(in: .whitespaces))
+            if rotateLabels {
+                svg += "<text x=\"\(cx)\" y=\"\(labelY)\" text-anchor=\"start\" fill=\"\(mutedText)\" font-size=\"11\" font-family=\"-apple-system,sans-serif\" transform=\"rotate(45,\(cx),\(labelY))\">\(labelText)</text>\n"
+            } else {
+                svg += "<text x=\"\(cx)\" y=\"\(labelY)\" text-anchor=\"middle\" fill=\"\(mutedText)\" font-size=\"11\" font-family=\"-apple-system,sans-serif\">\(labelText)</text>\n"
+            }
         }
 
         svg += "</svg>"
