@@ -88,6 +88,61 @@ enum HTMLComposer {
               font-size: 12px;
             }
             .widget-content th { background: rgba(255, 255, 255, 0.05); font-weight: 600; }
+
+            /* ── Widget entrance animations ── */
+            @keyframes cw-grow-y  { from { transform: scaleY(0) }  to { transform: scaleY(1) } }
+            @keyframes cw-grow-x  { from { transform: scaleX(0) }  to { transform: scaleX(1) } }
+            @keyframes cw-fade-in { from { opacity: 0 }            to { opacity: 1 } }
+            @keyframes cw-fade-scale {
+              from { opacity: 0; transform: scale(0.92) }
+              to   { opacity: 1; transform: scale(1) }
+            }
+            @keyframes cw-fade-up {
+              from { opacity: 0; transform: translateY(14px) }
+              to   { opacity: 1; transform: translateY(0) }
+            }
+            @keyframes cw-fade-down {
+              from { opacity: 0; transform: translateY(-10px) }
+              to   { opacity: 1; transform: translateY(0) }
+            }
+            @keyframes cw-pop {
+              0%   { transform: scale(0.4) }
+              70%  { transform: scale(1.08) }
+              100% { transform: scale(1) }
+            }
+
+            .cw-anim-grow-y {
+              animation: cw-grow-y 500ms cubic-bezier(0.34,1.56,0.64,1) both;
+              animation-delay: calc(var(--i,0) * 70ms);
+              transform-origin: center bottom;
+            }
+            .cw-anim-grow-x {
+              animation: cw-grow-x 500ms cubic-bezier(0.16,1,0.3,1) both;
+              transform-origin: left center;
+            }
+            .cw-anim-fade-scale {
+              animation: cw-fade-scale 400ms cubic-bezier(0.16,1,0.3,1) both;
+              animation-delay: calc(var(--i,0) * 70ms);
+            }
+            .cw-anim-fade-up {
+              animation: cw-fade-up 350ms cubic-bezier(0.16,1,0.3,1) both;
+              animation-delay: calc(var(--i,0) * 55ms);
+            }
+            .cw-anim-fade-down {
+              animation: cw-fade-down 350ms cubic-bezier(0.16,1,0.3,1) both;
+            }
+            .cw-anim-pop {
+              animation: cw-pop 350ms cubic-bezier(0.16,1,0.3,1) both;
+              animation-delay: calc(var(--i,0) * 80ms);
+            }
+            .cw-anim-bar-label {
+              animation: cw-fade-in 250ms ease-out both;
+              animation-delay: calc(var(--i,0) * 70ms + 350ms);
+            }
+
+            @media (prefers-reduced-motion: reduce) {
+              [class*="cw-anim-"] { animation: none !important; }
+            }
           </style>
         </head>
         <body>
