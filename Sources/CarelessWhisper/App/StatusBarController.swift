@@ -186,14 +186,33 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         NSWorkspace.shared.open(AppConstants.issuesURL)
     }
 
+    private var aboutWindow: NSWindow?
+
     @objc private func showAbout() {
-        NSApplication.shared.orderFrontStandardAboutPanel(options: [
-            .applicationVersion: Bundle.main.appVersion,
-            .credits: NSAttributedString(
-                string: "100% local voice-to-text for macOS\n\(AppConstants.repoURL.absoluteString)",
-                attributes: [.font: NSFont.systemFont(ofSize: 11)]
-            ),
-        ])
+        if let win = aboutWindow {
+            win.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        let info = Bundle.main.infoDictionary
+        let shortVersion = info?["CFBundleShortVersionString"] as? String ?? ""
+        let buildVersion = info?["CFBundleVersion"] as? String ?? ""
+        let versionText = (buildVersion.isEmpty || buildVersion == shortVersion)
+            ? shortVersion
+            : "\(shortVersion) (\(buildVersion))"
+
+        let hosting = NSHostingController(rootView: AboutView(version: versionText))
+        let window = NSWindow(contentViewController: hosting)
+        window.styleMask = [.titled, .closable]
+        window.title = ""
+        window.titlebarAppearsTransparent = true
+        window.isMovableByWindowBackground = true
+        window.standardWindowButton(.miniaturizeButton)?.isHidden = true
+        window.standardWindowButton(.zoomButton)?.isHidden = true
+        window.center()
+        window.isReleasedWhenClosed = false
+        aboutWindow = window
+        window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
 
@@ -207,5 +226,37 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         Task { @MainActor in
             updateMenu()
         }
+    }
+}
+
+private struct AboutView: View {
+    let version: String
+
+    var body: some View {
+        VStack(spacing: 18) {
+            if let icon = NSApp.applicationIconImage {
+                Image(nsImage: icon)
+                    .resizable()
+                    .frame(width: 96, height: 96)
+            }
+            VStack(spacing: 4) {
+                Text("Careless Whisper")
+                    .font(.system(size: 22, weight: .bold))
+                Text("by Alex Trzyna")
+                    .font(.system(size: 13))
+                    .foregroundColor(.secondary)
+            }
+            Text(version)
+                .font(.system(size: 12))
+                .foregroundColor(.secondary)
+            Text("100% local voice-to-text for macOS")
+                .font(.system(size: 12))
+            Link(AppConstants.repoURL.absoluteString, destination: AppConstants.repoURL)
+                .font(.system(size: 12))
+        }
+        .padding(.horizontal, 32)
+        .padding(.top, 8)
+        .padding(.bottom, 28)
+        .frame(minWidth: 420)
     }
 }
