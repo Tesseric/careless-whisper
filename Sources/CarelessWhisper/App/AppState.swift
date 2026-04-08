@@ -250,7 +250,7 @@ final class AppState: ObservableObject {
         // Poll immediately, then every 10 seconds
         pollGitContext()
         gitPollingTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
-            Task { @MainActor in
+            Task { @MainActor [weak self] in
                 self?.pollGitContext()
             }
         }
@@ -264,7 +264,7 @@ final class AppState: ObservableObject {
             guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
                   let bundleID = app.bundleIdentifier,
                   GitContextService.isTerminal(bundleID: bundleID) else { return }
-            Task { @MainActor in
+            Task { @MainActor [weak self] in
                 self?.pollGitContext()
             }
         }
@@ -304,9 +304,11 @@ final class AppState: ObservableObject {
             return
         }
 
-        Task {
+        Task { [weak self] in
             let context = await GitContextService.detect(terminalPID: pid, terminalBundleID: bundleID)
-            self.gitContext = context
+            await MainActor.run {
+                self?.gitContext = context
+            }
         }
     }
 

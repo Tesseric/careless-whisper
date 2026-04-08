@@ -9,8 +9,15 @@ final class HTTPConnection: Hashable {
     private let handler: (HTTPRequest) async -> HTTPResponse
     private let id = UUID()
 
-    /// Called when the connection is finished (response sent or error).
+    /// Called when the connection is finished (response sent or error). Fires exactly once.
     var onComplete: (() -> Void)?
+    private var didComplete = false
+
+    private func complete() {
+        guard !didComplete else { return }
+        didComplete = true
+        onComplete?()
+    }
 
     init(connection: NWConnection, handler: @escaping (HTTPRequest) async -> HTTPResponse) {
         self.connection = connection
@@ -31,9 +38,9 @@ final class HTTPConnection: Hashable {
             case .failed(let error):
                 self?.logger.warning("Connection failed: \(error)")
                 self?.connection.cancel()
-                self?.onComplete?()
+                self?.complete()
             case .cancelled:
-                break
+                self?.complete()
             default:
                 break
             }
@@ -135,7 +142,7 @@ final class HTTPConnection: Hashable {
                 self?.logger.warning("Send error: \(error)")
             }
             self?.connection.cancel()
-            self?.onComplete?()
+            self?.complete()
         })
     }
 }
