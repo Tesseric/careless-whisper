@@ -178,8 +178,8 @@ enum WidgetTemplateRegistry {
 
             html += """
               <div class="cw-anim-fade-up" style="--i:\(i);position:relative;\(margin)">
-                <div class="cw-anim-pop" style="--i:\(i);position:absolute;left:-20px;top:2px;width:10px;height:10px;border-radius:50%;\(dotStyle)"></div>
-                <div data-pipe="labels" style="font-size:11px;font-weight:600;color:\(textColor)">\(esc(label))</div>
+                <div data-step-dot class="cw-anim-pop" style="--i:\(i);position:absolute;left:-20px;top:2px;width:10px;height:10px;border-radius:50%;\(dotStyle)"></div>
+                <div data-pipe="labels" data-step-label style="font-size:11px;font-weight:600;color:\(textColor)">\(esc(label))</div>
             """
             if let detail, !detail.isEmpty {
                 html += """
@@ -191,8 +191,67 @@ enum WidgetTemplateRegistry {
 
         html += "</div>\n"
         html += pipeRedistributionScript
+        html += stepsRestyleScript
         return html
     }
+
+    /// Reapplies dot/label colors when `--statuses` changes via `_updateWidgetParams`.
+    /// Mirrors `stepStyle(for:)` in JS — keep in sync with the Swift switch above.
+    private static let stepsRestyleScript = """
+    <script>
+    (function(){
+      var root = document.currentScript.parentElement;
+      if (!root) return;
+      var card = root.closest('.widget-card') || root.parentElement;
+      if (!card) return;
+
+      var PENDING = { bg: 'rgba(255,255,255,0.12)', shadow: 'none', border: '1px solid rgba(255,255,255,0.2)', text: 'rgba(255,255,255,0.4)' };
+      function styleFor(status) {
+        switch ((status || '').trim().toLowerCase()) {
+          case 'done': case 'complete': case 'completed': case 'passed': case 'pass': case 'success':
+            return { bg: '#50fa7b', shadow: '0 0 6px #50fa7b', border: 'none', text: '#50fa7b' };
+          case 'running': case 'active': case 'in-progress': case 'in_progress':
+            return { bg: '#8be9fd', shadow: '0 0 6px #8be9fd', border: 'none', text: '#8be9fd' };
+          case 'failed': case 'fail': case 'error':
+            return { bg: '#ff5555', shadow: '0 0 6px #ff5555', border: 'none', text: '#ff5555' };
+          case 'skipped': case 'skip':
+            return PENDING;
+          default:
+            return PENDING;
+        }
+      }
+
+      function restyle() {
+        var style = card.getAttribute('style') || '';
+        var m = style.match(/--statuses\\s*:\\s*([^;]+)/);
+        if (!m) return;
+        var parts = m[1].trim().split('|');
+        var dots = root.querySelectorAll('[data-step-dot]');
+        var labels = root.querySelectorAll('[data-step-label]');
+        var n = Math.min(dots.length, parts.length);
+        for (var i = 0; i < n; i++) {
+          var s = styleFor(parts[i]);
+          dots[i].style.background = s.bg;
+          dots[i].style.boxShadow = s.shadow;
+          dots[i].style.border = s.border;
+          if (labels[i]) labels[i].style.color = s.text;
+        }
+      }
+
+      var obs = new MutationObserver(function(muts) {
+        for (var i = 0; i < muts.length; i++) {
+          var mu = muts[i];
+          if (mu.type === 'attributes' && mu.target === card && mu.attributeName === 'style') {
+            restyle();
+            break;
+          }
+        }
+      });
+      obs.observe(card, { attributes: true });
+      restyle();
+    })();
+    </script>
+    """
 
     private static func stepStyle(for status: String) -> (dotStyle: String, textColor: String) {
         switch status.lowercased() {
