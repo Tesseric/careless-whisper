@@ -84,11 +84,13 @@ final class KeyInterceptor {
 
     /// Called from the CGEventTap callback on the main run loop.
     fileprivate func handleKeyEvent(_ proxy: CGEventTapProxy, type: CGEventType, event: CGEvent) -> CGEvent? {
-        // Re-enable if macOS disabled the tap due to timeout
-        if type == .tapDisabledByTimeout {
+        // Re-enable if macOS disabled the tap (timeout or user input). Without this,
+        // a long main-thread stall during a session will permanently disable the tap
+        // and the next '1' press would be delivered to the terminal as garbage input.
+        if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             if let tap = eventTap, isActive {
                 CGEvent.tapEnable(tap: tap, enable: true)
-                logger.notice("Re-enabled event tap after timeout")
+                logger.notice("Re-enabled event tap after disable (\(type.rawValue))")
             }
             return event
         }

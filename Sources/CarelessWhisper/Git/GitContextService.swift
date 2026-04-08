@@ -510,6 +510,7 @@ final class GitContextService {
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice
+        defer { try? pipe.fileHandleForReading.close() }
         do {
             if timeout > 0 {
                 let semaphore = DispatchSemaphore(value: 0)
@@ -517,6 +518,9 @@ final class GitContextService {
                 try process.run()
                 if semaphore.wait(timeout: .now() + timeout) == .timedOut {
                     process.terminate()
+                    // terminate() is async — wait for the child to actually exit so its
+                    // FDs and zombie entry are reaped before we return.
+                    process.waitUntilExit()
                     return nil
                 }
             } else {
