@@ -309,7 +309,7 @@ struct SettingsView: View {
         appState.hotKeyManager.register()
         appState.updateHotkeyDescription()
         UserDefaults.standard.set(Int(combo.carbonKeyCode), forKey: "hotkeyKeyCode")
-        UserDefaults.standard.set(Int(combo.carbonModifiers), forKey: "hotkeyModifiers")
+        UserDefaults.standard.set(Int(combo.modifiers.rawValue), forKey: "hotkeyModifiers")
     }
 }
 
