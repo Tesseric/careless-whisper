@@ -15,6 +15,17 @@ final class HotKeyManager {
     var keyCombo: KeyCombo
 
     init() {
+        // One-time migration: prior versions wrote Carbon modifier masks under
+        // "hotkeyModifiers" but read them back as Cocoa NSEvent.ModifierFlags,
+        // producing a garbage combo on every relaunch. Clear the stale value so
+        // affected users fall back to the default once, then re-pick if desired.
+        let migrationKey = "hotkeyModifiersV2Migrated"
+        if !UserDefaults.standard.bool(forKey: migrationKey) {
+            UserDefaults.standard.removeObject(forKey: "hotkeyKeyCode")
+            UserDefaults.standard.removeObject(forKey: "hotkeyModifiers")
+            UserDefaults.standard.set(true, forKey: migrationKey)
+        }
+
         // Load saved hotkey or use default (Option + `)
         if let keyCode = UserDefaults.standard.object(forKey: "hotkeyKeyCode") as? Int,
            let key = Key(carbonKeyCode: UInt32(keyCode)) {
