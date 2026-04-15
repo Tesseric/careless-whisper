@@ -144,13 +144,21 @@ final class AppState: ObservableObject {
         await loadModel()
         hotKeyManager.register()
 
-        // Restore persisted audio input device
         if selectedInputDeviceID != 0 {
             audioCaptureService.selectedDeviceID = UInt32(selectedInputDeviceID)
         }
 
         hasCompletedOnboarding = true
         startGitPolling()
+    }
+
+    func setInputDevice(_ deviceID: UInt32) {
+        audioCaptureService.selectedDeviceID = deviceID == 0 ? nil : deviceID
+        selectedInputDeviceID = Int(deviceID)
+    }
+
+    var currentInputDeviceID: UInt32 {
+        audioCaptureService.selectedDeviceID ?? 0
     }
 
     func openSettings() {

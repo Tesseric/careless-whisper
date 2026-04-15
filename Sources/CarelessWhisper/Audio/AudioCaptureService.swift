@@ -90,7 +90,7 @@ final class AudioCaptureService {
             var nameRef: Unmanaged<CFString>?
             var nameSize = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
             guard AudioObjectGetPropertyData(id, &nameAddress, 0, nil, &nameSize, &nameRef) == noErr,
-                  let name = nameRef?.takeUnretainedValue() as String? else {
+                  let name = nameRef?.takeRetainedValue() as String? else {
                 return nil
             }
 

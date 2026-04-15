@@ -10,6 +10,8 @@ struct SettingsView: View {
     @AppStorage("completionSound") private var completionSound = true
     @State private var isRecordingHotkey = false
     @State private var skillInstallToken = UUID()
+    @State private var availableInputDevices: [AudioInputDevice] = []
+    @State private var inputDeviceSelection: UInt32 = 0
 
     var body: some View {
         ScrollView {
@@ -111,25 +113,26 @@ struct SettingsView: View {
             Label("Input Device", systemImage: "waveform")
                 .font(.headline)
 
-            let devices = appState.audioCaptureService.availableInputDevices()
-            if devices.isEmpty {
+            if availableInputDevices.isEmpty {
                 Text("No input devices found")
                     .foregroundStyle(.secondary)
             } else {
-                Picker("", selection: Binding(
-                    get: { appState.audioCaptureService.selectedDeviceID ?? 0 },
-                    set: {
-                        appState.audioCaptureService.selectedDeviceID = $0 == 0 ? nil : $0
-                        appState.selectedInputDeviceID = Int($0)
-                    }
-                )) {
+                Picker("", selection: $inputDeviceSelection) {
                     Text("System Default").tag(UInt32(0))
-                    ForEach(devices) { device in
+                    ForEach(availableInputDevices) { device in
                         Text(device.name).tag(device.id)
                     }
                 }
                 .labelsHidden()
+                .onChange(of: inputDeviceSelection) { _, newValue in
+                    appState.setInputDevice(newValue)
+                }
             }
+        }
+        .onAppear {
+            availableInputDevices = appState.audioCaptureService.availableInputDevices()
+            let current = appState.currentInputDeviceID
+            inputDeviceSelection = availableInputDevices.contains(where: { $0.id == current }) ? current : 0
         }
     }
 
