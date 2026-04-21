@@ -1,4 +1,7 @@
 import AppKit
+import os
+
+private let appLogger = Logger(subsystem: "com.carelesswhisper", category: "AppDelegate")
 
 @main
 enum CarelessWhisperApp {
@@ -22,6 +25,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let statusBarController = StatusBarController()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        terminateOtherInstances()
+
         statusBarController.setup(appState: appState)
 
         Task { @MainActor in
@@ -41,5 +46,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
+    }
+
+    private func terminateOtherInstances() {
+        let me = ProcessInfo.processInfo.processIdentifier
+        guard let bundleID = Bundle.main.bundleIdentifier else { return }
+        let others = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
+            .filter { $0.processIdentifier != me }
+        for app in others {
+            appLogger.info("Terminating stale instance pid=\(app.processIdentifier, privacy: .public) at \(app.bundleURL?.path ?? "unknown", privacy: .public)")
+            if !app.terminate() {
+                app.forceTerminate()
+            }
+        }
     }
 }
