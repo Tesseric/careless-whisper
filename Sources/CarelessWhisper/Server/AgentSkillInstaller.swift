@@ -297,6 +297,28 @@ enum AgentSkillInstaller {
 
     Run `~/.claude/skills/overlay/demo.sh` to cycle through all visualization types.
     Options: `--delay 5` for slower pacing, or `demo.sh sparkline` to show just one.
+
+    ## Git Overlay Annotation
+
+    If the user has enabled the persistent Git Overlay (a live diffstat pinned to their
+    terminal window), you can enrich its expanded view with a short change summary and a
+    risk assessment. Do this after making substantial changes, so the user gets a glanceable
+    take on what changed and how risky it is.
+
+    ```bash
+    cat > /tmp/git-annotate.json <<'JSON'
+    {
+      "summary": "Refactors auth into a service; adds token refresh and tests.",
+      "risk": "medium",
+      "highlights": ["Changes session-expiry handling", "Touches login redirect"]
+    }
+    JSON
+    ~/.claude/skills/overlay/overlay-cli git-annotate /tmp/git-annotate.json
+    ```
+
+    Fields (all optional): `summary` (one or two sentences), `risk` (`low` | `medium` | `high`),
+    `highlights` (array of short warning lines). The annotation auto-clears when the branch
+    or repo changes. To clear it manually, POST to `/git-overlay/annotate/clear`.
     """
 
     // MARK: - CLI Script
@@ -309,6 +331,7 @@ enum AgentSkillInstaller {
     #   update     [file.json]  — upsert one widget (file path or stdin)
     #   set-params [file.json]  — update widget params (file path or stdin)
     #   dismiss    [widget-id]  — clear all or one widget
+    #   git-annotate [file.json] — annotate the persistent git overlay (summary/risk/highlights)
     #   health                  — check server status
     set -euo pipefail
 
@@ -364,11 +387,16 @@ enum AgentSkillInstaller {
           curl -sf --max-time 5 -X POST "$BASE/overlay/dismiss" -H "$AUTH"
         fi
         ;;
+      git-annotate)
+        INPUT="${1:--}"
+        curl -sf --max-time 5 -X POST "$BASE/git-overlay/annotate" \\
+          -H "$AUTH" -H "Content-Type: application/json" -d "@$INPUT"
+        ;;
       health)
         curl -sf --max-time 5 "$BASE/health"
         ;;
       *)
-        echo "Usage: overlay-cli {show|update|set-params|dismiss|health}" >&2
+        echo "Usage: overlay-cli {show|update|set-params|dismiss|git-annotate|health}" >&2
         exit 1
         ;;
     esac
