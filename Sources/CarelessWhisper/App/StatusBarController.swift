@@ -16,6 +16,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     private var recordMenuItem: NSMenuItem?
     private var lastTranscriptionMenuItem: NSMenuItem?
     private var copyTranscriptionMenuItem: NSMenuItem?
+    private var gitOverlayMenuItem: NSMenuItem?
 
     func setup(appState: AppState) {
         self.appState = appState
@@ -56,6 +57,15 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         recordItem.target = self
         menu.addItem(recordItem)
         self.recordMenuItem = recordItem
+
+        menu.addItem(.separator())
+
+        // Git overlay toggle
+        let gitOverlayItem = NSMenuItem(title: "Show Git Overlay", action: #selector(toggleGitOverlay), keyEquivalent: "")
+        gitOverlayItem.target = self
+        gitOverlayItem.state = (appState.persistentGitOverlayEnabled ? .on : .off)
+        menu.addItem(gitOverlayItem)
+        self.gitOverlayMenuItem = gitOverlayItem
 
         menu.addItem(.separator())
 
@@ -111,6 +121,8 @@ final class StatusBarController: NSObject, NSMenuDelegate {
 
     private func updateMenu() {
         guard let appState else { return }
+
+        gitOverlayMenuItem?.state = appState.persistentGitOverlayEnabled ? .on : .off
 
         // Update icon
         updateIcon(appState.menuBarIcon)
@@ -168,6 +180,13 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         } else if appState.recordingState == .recording {
             appState.stopRecordingAndTranscribe()
         }
+    }
+
+    @objc private func toggleGitOverlay() {
+        guard let appState else { return }
+        appState.persistentGitOverlayEnabled.toggle()
+        appState.updateGitOverlayVisibility()
+        gitOverlayMenuItem?.state = appState.persistentGitOverlayEnabled ? .on : .off
     }
 
     @objc private func openSettings() {

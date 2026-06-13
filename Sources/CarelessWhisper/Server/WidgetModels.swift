@@ -58,3 +58,18 @@ struct ServerInfo: Codable {
     let token: String
     let pid: Int32
 }
+
+// MARK: - Git overlay annotation
+
+/// Agent-assessed risk level for the persistent git overlay's annotation zone.
+enum RiskLevel: String, Codable, Equatable {
+    case low, medium, high
+}
+
+/// Agent-provided enhancement for the persistent git overlay: a short change summary,
+/// an optional risk level, and optional highlight/warning lines. All fields optional.
+struct GitAnnotation: Codable, Equatable {
+    var summary: String?
+    var risk: RiskLevel?
+    var highlights: [String]?
+}

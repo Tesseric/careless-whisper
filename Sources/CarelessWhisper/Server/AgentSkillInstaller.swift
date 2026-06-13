@@ -297,6 +297,35 @@ enum AgentSkillInstaller {
 
     Run `~/.claude/skills/overlay/demo.sh` to cycle through all visualization types.
     Options: `--delay 5` for slower pacing, or `demo.sh sparkline` to show just one.
+
+    ## Git Overlay Annotation
+
+    After making substantial changes to a git repo, proactively post a change assessment to
+    the persistent Git Overlay — a glanceable summary and risk level the user sees pinned to
+    their terminal's upper-right corner. Do this on your own initiative as you wrap up a unit
+    of work (a feature, a refactor, a fix), not only when asked. It is safe to post even if the
+    overlay isn't currently visible — the assessment is simply stored until the overlay is
+    shown — so you never need to check first. If the user appears unaware of this overlay,
+    mention they can turn it on from the menu bar ("Show Git Overlay").
+
+    Step 1: Use the Write tool to write the annotation to `/tmp/git-annotate.json`:
+    ```json
+    {
+      "summary": "Refactors auth into a service; adds token refresh and tests.",
+      "risk": "medium",
+      "highlights": ["Changes session-expiry handling", "Touches login redirect"]
+    }
+    ```
+    Step 2: Run the CLI:
+    ```bash
+    ~/.claude/skills/overlay/overlay-cli git-annotate /tmp/git-annotate.json
+    ```
+
+    Fields (all optional): `summary` (one or two sentences on what changed), `risk`
+    (`low` | `medium` | `high` — colors the badge green/yellow/red), `highlights` (array of
+    short warnings or things worth a second look). Re-post anytime to update the assessment;
+    it auto-clears when the branch or repo changes. To clear it manually, POST to
+    `/git-overlay/annotate/clear`.
     """
 
     // MARK: - CLI Script
@@ -309,6 +338,7 @@ enum AgentSkillInstaller {
     #   update     [file.json]  — upsert one widget (file path or stdin)
     #   set-params [file.json]  — update widget params (file path or stdin)
     #   dismiss    [widget-id]  — clear all or one widget
+    #   git-annotate [file.json] — annotate the persistent git overlay (summary/risk/highlights)
     #   health                  — check server status
     set -euo pipefail
 
@@ -364,11 +394,16 @@ enum AgentSkillInstaller {
           curl -sf --max-time 5 -X POST "$BASE/overlay/dismiss" -H "$AUTH"
         fi
         ;;
+      git-annotate)
+        INPUT="${1:--}"
+        curl -sf --max-time 5 -X POST "$BASE/git-overlay/annotate" \\
+          -H "$AUTH" -H "Content-Type: application/json" -d "@$INPUT"
+        ;;
       health)
         curl -sf --max-time 5 "$BASE/health"
         ;;
       *)
-        echo "Usage: overlay-cli {show|update|set-params|dismiss|health}" >&2
+        echo "Usage: overlay-cli {show|update|set-params|dismiss|git-annotate|health}" >&2
         exit 1
         ;;
     esac

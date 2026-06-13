@@ -30,6 +30,9 @@ final class AppState: ObservableObject {
     @Published var widgetContentHeight: CGFloat = 0
     @Published var gitContextSide: Edge = .trailing
     @Published var overlayDualColumn: Bool = false
+    @Published var gitOverlayExpanded: Bool = false
+    @Published var gitOverlayDiffScope: DiffScope = .branch
+    @Published var gitOverlayAnnotation: GitAnnotation?
     @Published var clipboardImageDetected: Bool = false
     @Published var clipboardImageAttached: Bool = false
     var attachedImagePath: String?
@@ -50,6 +53,8 @@ final class AppState: ObservableObject {
     let clipboardImageService = ClipboardImageService()
     let keyInterceptor = KeyInterceptor()
     private let overlayController = OverlayController()
+    private let gitOverlayController = WindowTrackingOverlayController()
+    private var gitOverlayCancellables: Set<AnyCancellable> = []
     let overlayServer = OverlayServer()
     let settingsWindowController = SettingsWindowController()
 
@@ -60,15 +65,19 @@ final class AppState: ObservableObject {
     private var isProcessingChunk = false
     private var gitPollingTimer: Timer?
     private var lastPolledTerminalPID: pid_t?
+    /// Read-only access to the last detected terminal PID, for window-tracking overlays.
+    var lastPolledTerminalPIDForOverlay: pid_t? { lastPolledTerminalPID }
     private var lastPolledTerminalBundleID: String?
     private var workspaceActivationObserver: Any?
     private var clipboardChangeCount: Int = 0
+    private var lastAnnotatedRepoBranch: String?
 
     @AppStorage("selectedModel") var selectedModelRaw: String = WhisperModel.baseEn.rawValue
     @AppStorage("completionSound") var completionSoundEnabled: Bool = true
     @AppStorage("selectedInputDevice") var selectedInputDeviceID: Int = 0
     @AppStorage("autoEnter") var autoEnter: Bool = false
     @AppStorage("agentOverlayEnabled") var agentOverlayEnabled: Bool = false
+    @AppStorage("persistentGitOverlayEnabled") var persistentGitOverlayEnabled: Bool = false
     @AppStorage("toggleMode") var toggleMode: Bool = false
 
     var selectedModel: WhisperModel {
@@ -150,6 +159,7 @@ final class AppState: ObservableObject {
 
         hasCompletedOnboarding = true
         startGitPolling()
+        startGitOverlayObservers()
     }
 
     func setInputDevice(_ deviceID: UInt32) {
@@ -198,6 +208,12 @@ final class AppState: ObservableObject {
         }
         overlayServer.onClearWidgets = { [weak self] in
             self?.clearAgentWidgets()
+        }
+        overlayServer.onSetGitAnnotation = { [weak self] annotation in
+            self?.gitOverlayAnnotation = annotation
+        }
+        overlayServer.onClearGitAnnotation = { [weak self] in
+            self?.gitOverlayAnnotation = nil
         }
         overlayServer.getWidgetCount = { [weak self] in
             self?.agentWidgets.count ?? 0
@@ -315,7 +331,14 @@ final class AppState: ObservableObject {
         Task { [weak self] in
             let context = await GitContextService.detect(terminalPID: pid, terminalBundleID: bundleID)
             await MainActor.run {
-                self?.gitContext = context
+                guard let self else { return }
+                let newKey = context.map { "\($0.repoName)#\($0.branch)" }
+                if newKey != self.lastAnnotatedRepoBranch {
+                    self.gitOverlayAnnotation = nil
+                    self.lastAnnotatedRepoBranch = newKey
+                }
+                self.gitContext = context
+                self.gitOverlayController.reposition()
             }
         }
     }
@@ -327,6 +350,39 @@ final class AppState: ObservableObject {
             overlayController.show(appState: self)
         } else {
             overlayController.dismiss()
+        }
+    }
+
+    /// Shows/hides the persistent git overlay based on the toggle + current git context.
+    func updateGitOverlayVisibility() {
+        let frontmostIsTerminal = GitContextService.isTerminal(
+            bundleID: NSWorkspace.shared.frontmostApplication?.bundleIdentifier)
+        let shouldShow = persistentGitOverlayEnabled && gitContext != nil && frontmostIsTerminal
+        if shouldShow {
+            gitOverlayController.show(appState: self)
+            gitOverlayController.reposition()
+        } else {
+            gitOverlayController.dismiss()
+        }
+    }
+
+    /// Subscribes the persistent git overlay to the state that drives its visibility/position.
+    /// Call once during setup.
+    func startGitOverlayObservers() {
+        // Visibility reacts to git context presence and expansion changes.
+        // Note: persistentGitOverlayEnabled is @AppStorage and does not expose a Combine
+        // publisher; visibility for the toggle is driven by updateGitOverlayVisibility()
+        // calls from menu/settings actions (added in a later task).
+        Publishers.CombineLatest3($gitContext, $gitOverlayExpanded, $gitOverlayAnnotation)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _, _, _ in self?.updateGitOverlayVisibility() }
+            .store(in: &gitOverlayCancellables)
+
+        // Re-evaluate visibility (and reposition if visible) when the user switches apps/windows.
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.updateGitOverlayVisibility() }
         }
     }
 

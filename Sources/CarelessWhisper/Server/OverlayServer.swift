@@ -22,6 +22,8 @@ final class OverlayServer {
     var onUpdateParams: ((String, [String: String]) -> Void)?
     var onRemoveWidget: ((String) -> Void)?
     var onClearWidgets: (() -> Void)?
+    var onSetGitAnnotation: ((GitAnnotation) -> Void)?
+    var onClearGitAnnotation: (() -> Void)?
 
     /// Returns the current overlay response info. Set by AppState.
     var getWidgetCount: (() -> Int)?
@@ -135,6 +137,13 @@ final class OverlayServer {
             let id = String(path.dropFirst("/overlay/dismiss/".count))
             return await handleDismissWidget(id: id)
 
+        case ("POST", "/git-overlay/annotate"):
+            return await handleGitAnnotate(request)
+
+        case ("POST", "/git-overlay/annotate/clear"):
+            await MainActor.run { onClearGitAnnotation?() }
+            return HTTPResponse(status: 200, body: ["ok": true])
+
         default:
             if request.method != "GET" && request.method != "POST" {
                 return HTTPResponse(status: 405, body: ["error": "Method not allowed"])
@@ -217,6 +226,17 @@ final class OverlayServer {
             onRemoveWidget?(id)
         }
         return await makeOverlayResponse()
+    }
+
+    private func handleGitAnnotate(_ request: HTTPRequest) async -> HTTPResponse {
+        guard let body = request.body else {
+            return HTTPResponse(status: 400, body: ["error": "Missing request body"])
+        }
+        guard let annotation = try? JSONDecoder().decode(GitAnnotation.self, from: body) else {
+            return HTTPResponse(status: 400, body: ["error": "Invalid JSON — expected {\"summary\":\"...\",\"risk\":\"low|medium|high\",\"highlights\":[\"...\"]}"])
+        }
+        await MainActor.run { onSetGitAnnotation?(annotation) }
+        return HTTPResponse(status: 200, body: ["ok": true])
     }
 
     private func makeOverlayResponse() async -> HTTPResponse {
