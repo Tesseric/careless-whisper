@@ -21,6 +21,7 @@ struct SettingsView: View {
                 audioSection
                 optionsSection
                 agentIntegrationSection
+                gitOverlaySection
                 permissionsSection
                 versionFooter
             }
@@ -242,6 +243,28 @@ struct SettingsView: View {
                 .padding(.leading, 4)
             }
         }
+    }
+
+    // MARK: - Git Overlay
+
+    private var gitOverlaySection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Git Overlay", systemImage: "chart.bar.xaxis")
+                .font(.headline)
+
+            Toggle("Show persistent git overlay", isOn: Binding(
+                get: { appState.persistentGitOverlayEnabled },
+                set: { newValue in
+                    appState.persistentGitOverlayEnabled = newValue
+                    appState.updateGitOverlayVisibility()
+                }
+            ))
+
+            Text("Pins a live diffstat to the focused terminal window's upper-right corner. Click it to expand. Requires Accessibility permission.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 4)
     }
 
     // MARK: - Permissions
