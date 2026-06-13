@@ -3,17 +3,6 @@ import AppKit
 import Combine
 import os
 
-// MARK: - Size-Observing NSHostingView
-
-/// NSHostingView subclass that notifies when its SwiftUI content's intrinsic size changes.
-private class SizeObservingHostingView<Content: View>: NSHostingView<Content> {
-    var onIntrinsicSizeInvalidated: (() -> Void)?
-
-    override func invalidateIntrinsicContentSize() {
-        super.invalidateIntrinsicContentSize()
-        onIntrinsicSizeInvalidated?()
-    }
-}
 
 /// Floating HUD shown during recording or when agent widgets are present — non-activating so it doesn't steal focus.
 @MainActor
