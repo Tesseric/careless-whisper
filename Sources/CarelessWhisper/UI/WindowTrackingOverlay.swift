@@ -133,7 +133,10 @@ private struct PersistentGitOverlayView: View {
                     annotation: appState.gitOverlayAnnotation,
                     onToggleScope: { appState.gitOverlayDiffScope = $0 },
                     onCollapse: { appState.gitOverlayExpanded = false },
-                    onClose: { appState.persistentGitOverlayEnabled = false }
+                    onClose: {
+                        appState.persistentGitOverlayEnabled = false
+                        appState.updateGitOverlayVisibility()
+                    }
                 )
             } else {
                 DiffStatPill(
