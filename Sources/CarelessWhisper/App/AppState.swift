@@ -30,6 +30,9 @@ final class AppState: ObservableObject {
     @Published var widgetContentHeight: CGFloat = 0
     @Published var gitContextSide: Edge = .trailing
     @Published var overlayDualColumn: Bool = false
+    @Published var gitOverlayExpanded: Bool = false
+    @Published var gitOverlayDiffScope: DiffScope = .branch
+    @Published var gitOverlayAnnotation: GitAnnotation?
     @Published var clipboardImageDetected: Bool = false
     @Published var clipboardImageAttached: Bool = false
     var attachedImagePath: String?
@@ -63,12 +66,14 @@ final class AppState: ObservableObject {
     private var lastPolledTerminalBundleID: String?
     private var workspaceActivationObserver: Any?
     private var clipboardChangeCount: Int = 0
+    private var lastAnnotatedRepoBranch: String?
 
     @AppStorage("selectedModel") var selectedModelRaw: String = WhisperModel.baseEn.rawValue
     @AppStorage("completionSound") var completionSoundEnabled: Bool = true
     @AppStorage("selectedInputDevice") var selectedInputDeviceID: Int = 0
     @AppStorage("autoEnter") var autoEnter: Bool = false
     @AppStorage("agentOverlayEnabled") var agentOverlayEnabled: Bool = false
+    @AppStorage("persistentGitOverlayEnabled") var persistentGitOverlayEnabled: Bool = false
     @AppStorage("toggleMode") var toggleMode: Bool = false
 
     var selectedModel: WhisperModel {
@@ -315,7 +320,13 @@ final class AppState: ObservableObject {
         Task { [weak self] in
             let context = await GitContextService.detect(terminalPID: pid, terminalBundleID: bundleID)
             await MainActor.run {
-                self?.gitContext = context
+                guard let self else { return }
+                let newKey = context.map { "\($0.repoName)#\($0.branch)" }
+                if newKey != self.lastAnnotatedRepoBranch {
+                    self.gitOverlayAnnotation = nil
+                    self.lastAnnotatedRepoBranch = newKey
+                }
+                self.gitContext = context
             }
         }
     }
