@@ -63,6 +63,8 @@ final class AppState: ObservableObject {
     private var isProcessingChunk = false
     private var gitPollingTimer: Timer?
     private var lastPolledTerminalPID: pid_t?
+    /// Read-only access to the last detected terminal PID, for window-tracking overlays.
+    var lastPolledTerminalPIDForOverlay: pid_t? { lastPolledTerminalPID }
     private var lastPolledTerminalBundleID: String?
     private var workspaceActivationObserver: Any?
     private var clipboardChangeCount: Int = 0
