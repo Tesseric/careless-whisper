@@ -42,6 +42,7 @@ struct GitContext {
     let diffPreviews: [DiffPreview]
     let ciStatus: CIStatus?
     let prInfo: PRInfo?
+    let diffStats: DiffStats?
 }
 
 struct AheadBehind {
@@ -154,6 +155,7 @@ final class GitContextService {
             let diffPreviews = parseDiffPreviews(unstagedFiles: unstaged, cwd: repoRoot)
             let ciStatus = queryCIStatus(branch: branch, cwd: repoRoot)
             let prInfo = queryPRInfo(branch: branch, cwd: repoRoot)
+            let diffStats = computeDiffStats(branch: branch, cwd: repoRoot)
 
             logger.info("Detected git context: \(repoName) @ \(branch) — \(staged.count) staged, \(unstaged.count) unstaged, \(branchFiles.count) branch")
             return GitContext(
@@ -161,7 +163,8 @@ final class GitContextService {
                 ownerAndRepo: ownerAndRepo, gitHubURL: gitHubURL,
                 stagedFiles: staged, unstagedFiles: unstaged, branchFiles: branchFiles,
                 aheadBehind: aheadBehind, lastCommit: lastCommit, stashCount: stashCount,
-                diffPreviews: diffPreviews, ciStatus: ciStatus, prInfo: prInfo
+                diffPreviews: diffPreviews, ciStatus: ciStatus, prInfo: prInfo,
+                diffStats: diffStats
             )
         }
 
@@ -332,13 +335,17 @@ final class GitContextService {
         }
     }
 
+    /// Merge-base of HEAD with the default branch (main/master). Nil on the default branch
+    /// itself or when no merge-base exists.
+    private static func mergeBaseWithDefault(branch: String, cwd: String) -> String? {
+        let defaultBranches = ["main", "master"]
+        guard !defaultBranches.contains(branch) else { return nil }
+        return defaultBranches.lazy.compactMap { git(["merge-base", $0, "HEAD"], cwd: cwd) }.first
+    }
+
     /// Files changed on this branch compared to the default branch (main/master).
     private static func parseBranchDiff(branch: String, cwd: String) -> [GitFileChange] {
-        let defaultBranches = ["main", "master"]
-        guard !defaultBranches.contains(branch) else { return [] }
-
-        let base = defaultBranches.lazy.compactMap { git(["merge-base", $0, "HEAD"], cwd: cwd) }.first
-        guard let base else { return [] }
+        guard let base = mergeBaseWithDefault(branch: branch, cwd: cwd) else { return [] }
 
         guard let output = git(["diff", "--name-status", base], cwd: cwd) else { return [] }
 
@@ -351,6 +358,19 @@ final class GitContextService {
             files.append(GitFileChange(path: path, type: charToChangeType(statusChar)))
         }
         return files
+    }
+
+    /// Computes line-change stats for the working tree (vs HEAD) and the branch (vs merge-base).
+    private static func computeDiffStats(branch: String, cwd: String) -> DiffStats {
+        let workingRaw = git(["diff", "--numstat", "HEAD"], cwd: cwd) ?? ""
+        let working = DiffStats.parseScope(numstat: workingRaw)
+
+        var branchScope: DiffStatScope?
+        if let base = mergeBaseWithDefault(branch: branch, cwd: cwd) {
+            let branchRaw = git(["diff", "--numstat", base], cwd: cwd) ?? ""
+            branchScope = DiffStats.parseScope(numstat: branchRaw)
+        }
+        return DiffStats(working: working, branch: branchScope)
     }
 
     private static func parseAheadBehind(branch: String, cwd: String) -> AheadBehind? {
