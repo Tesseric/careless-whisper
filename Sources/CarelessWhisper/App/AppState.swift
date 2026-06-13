@@ -355,7 +355,9 @@ final class AppState: ObservableObject {
 
     /// Shows/hides the persistent git overlay based on the toggle + current git context.
     func updateGitOverlayVisibility() {
-        let shouldShow = persistentGitOverlayEnabled && gitContext != nil
+        let frontmostIsTerminal = GitContextService.isTerminal(
+            bundleID: NSWorkspace.shared.frontmostApplication?.bundleIdentifier)
+        let shouldShow = persistentGitOverlayEnabled && gitContext != nil && frontmostIsTerminal
         if shouldShow {
             gitOverlayController.show(appState: self)
             gitOverlayController.reposition()
@@ -376,11 +378,11 @@ final class AppState: ObservableObject {
             .sink { [weak self] _, _, _ in self?.updateGitOverlayVisibility() }
             .store(in: &gitOverlayCancellables)
 
-        // Reposition when the user switches apps/windows (terminal moved/activated).
+        // Re-evaluate visibility (and reposition if visible) when the user switches apps/windows.
         NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in self?.gitOverlayController.reposition() }
+            Task { @MainActor in self?.updateGitOverlayVisibility() }
         }
     }
 
