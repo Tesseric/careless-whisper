@@ -27,12 +27,12 @@ enum ChangeClassifier {
     ]
 
     static func bucket(for path: String) -> ChangeBucket {
-        let lowerPath = path.lowercased()
-        let components = lowerPath.split(separator: "/").map(String.init)
-        let filename = components.last ?? lowerPath
+        let components = path.split(separator: "/").map(String.init)
+        let filename = components.last ?? path
 
-        // 1. Test — directory segment or filename pattern (wins over everything).
-        if components.dropLast().contains(where: { testDirSegments.contains($0) }) {
+        // 1. Test — directory segment (case-insensitive) or filename pattern (wins over everything).
+        let lowerComponents = components.map { $0.lowercased() }
+        if lowerComponents.dropLast().contains(where: { testDirSegments.contains($0) }) {
             return .test
         }
         if isTestFilename(filename) {
@@ -40,15 +40,16 @@ enum ChangeClassifier {
         }
 
         // 2. Other — docs/config/lockfiles.
-        if otherFilenames.contains(filename) {
+        let lowerFilename = filename.lowercased()
+        if otherFilenames.contains(lowerFilename) {
             return .other
         }
-        let ext = (filename as NSString).pathExtension
+        let ext = (lowerFilename as NSString).pathExtension
         if !ext.isEmpty, otherExtensions.contains(ext) {
             return .other
         }
         // Dotfiles like ".gitignore" have no pathExtension; check the leading-dot name too.
-        if filename.hasPrefix("."), otherExtensions.contains(String(filename.dropFirst())) {
+        if lowerFilename.hasPrefix("."), otherExtensions.contains(String(lowerFilename.dropFirst())) {
             return .other
         }
 
@@ -56,16 +57,21 @@ enum ChangeClassifier {
         return .functional
     }
 
-    /// Matches test filename conventions: *Test(s).ext, *_test.ext, *.test.ext, *.spec.ext,
-    /// test_*.py, *_spec.rb. `filename` is already lowercased.
+    /// Matches test filename conventions:
+    /// PascalCase `*Test`/`*Tests`, snake `*_test(s)`, dotted `*.test`/`*.spec`,
+    /// python `test_*.py`, ruby `*_spec.rb`. Uses original case to detect the
+    /// PascalCase boundary (a bare lowercase "...test" like `latest` is NOT a test).
     private static func isTestFilename(_ filename: String) -> Bool {
-        let base = (filename as NSString).deletingPathExtension      // e.g. "button.test"
-        let ext = (filename as NSString).pathExtension               // e.g. "tsx"
+        let nsName = filename as NSString
+        let base = nsName.deletingPathExtension          // original case, e.g. "AppStateTests" or "button.test"
+        let ext = nsName.pathExtension.lowercased()
+        let lowerBase = base.lowercased()
 
-        if base.hasSuffix("test") || base.hasSuffix("tests") { return true }   // appstatetests, parser_test
-        if base.hasSuffix(".test") || base.hasSuffix(".spec") { return true }  // button.test, button.spec
-        if base.hasPrefix("test_") && ext == "py" { return true }
-        if base.hasSuffix("_spec") && ext == "rb" { return true }
+        if base.hasSuffix("Test") || base.hasSuffix("Tests") { return true }   // PascalCase: AppStateTests, FooTest
+        if lowerBase.hasSuffix("_test") || lowerBase.hasSuffix("_tests") { return true }  // snake_case
+        if lowerBase.hasSuffix(".test") || lowerBase.hasSuffix(".spec") { return true }   // button.test.tsx -> base "button.test"
+        if lowerBase.hasPrefix("test_") && ext == "py" { return true }
+        if lowerBase.hasSuffix("_spec") && ext == "rb" { return true }
         return false
     }
 }

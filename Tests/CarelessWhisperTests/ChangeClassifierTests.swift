@@ -37,4 +37,11 @@ final class ChangeClassifierTests: XCTestCase {
         XCTAssertEqual(ChangeClassifier.bucket(for: "src/__tests__/fixtures/sample.json"), .test)
         XCTAssertEqual(ChangeClassifier.bucket(for: "Tests/data/config.yml"), .test)
     }
+
+    func testWordsEndingInTestAreNotTests() {
+        XCTAssertEqual(ChangeClassifier.bucket(for: "Sources/latest.swift"), .functional)
+        XCTAssertEqual(ChangeClassifier.bucket(for: "pkg/contest.go"), .functional)
+        XCTAssertEqual(ChangeClassifier.bucket(for: "ui/greatest.ts"), .functional)
+        XCTAssertEqual(ChangeClassifier.bucket(for: "app/FooTest.swift"), .test)
+    }
 }
