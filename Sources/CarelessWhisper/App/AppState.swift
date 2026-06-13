@@ -53,6 +53,8 @@ final class AppState: ObservableObject {
     let clipboardImageService = ClipboardImageService()
     let keyInterceptor = KeyInterceptor()
     private let overlayController = OverlayController()
+    private let gitOverlayController = WindowTrackingOverlayController()
+    private var gitOverlayCancellables: Set<AnyCancellable> = []
     let overlayServer = OverlayServer()
     let settingsWindowController = SettingsWindowController()
 
@@ -157,6 +159,7 @@ final class AppState: ObservableObject {
 
         hasCompletedOnboarding = true
         startGitPolling()
+        startGitOverlayObservers()
     }
 
     func setInputDevice(_ deviceID: UInt32) {
@@ -329,6 +332,7 @@ final class AppState: ObservableObject {
                     self.lastAnnotatedRepoBranch = newKey
                 }
                 self.gitContext = context
+                self.gitOverlayController.reposition()
             }
         }
     }
@@ -340,6 +344,37 @@ final class AppState: ObservableObject {
             overlayController.show(appState: self)
         } else {
             overlayController.dismiss()
+        }
+    }
+
+    /// Shows/hides the persistent git overlay based on the toggle + current git context.
+    func updateGitOverlayVisibility() {
+        let shouldShow = persistentGitOverlayEnabled && gitContext != nil
+        if shouldShow {
+            gitOverlayController.show(appState: self)
+            gitOverlayController.reposition()
+        } else {
+            gitOverlayController.dismiss()
+        }
+    }
+
+    /// Subscribes the persistent git overlay to the state that drives its visibility/position.
+    /// Call once during setup.
+    func startGitOverlayObservers() {
+        // Visibility reacts to git context presence and expansion changes.
+        // Note: persistentGitOverlayEnabled is @AppStorage and does not expose a Combine
+        // publisher; visibility for the toggle is driven by updateGitOverlayVisibility()
+        // calls from menu/settings actions (added in a later task).
+        Publishers.CombineLatest3($gitContext, $gitOverlayExpanded, $gitOverlayAnnotation)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _, _, _ in self?.updateGitOverlayVisibility() }
+            .store(in: &gitOverlayCancellables)
+
+        // Reposition when the user switches apps/windows (terminal moved/activated).
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.gitOverlayController.reposition() }
         }
     }
 
