@@ -209,6 +209,12 @@ final class AppState: ObservableObject {
         overlayServer.onClearWidgets = { [weak self] in
             self?.clearAgentWidgets()
         }
+        overlayServer.onSetGitAnnotation = { [weak self] annotation in
+            self?.gitOverlayAnnotation = annotation
+        }
+        overlayServer.onClearGitAnnotation = { [weak self] in
+            self?.gitOverlayAnnotation = nil
+        }
         overlayServer.getWidgetCount = { [weak self] in
             self?.agentWidgets.count ?? 0
         }
